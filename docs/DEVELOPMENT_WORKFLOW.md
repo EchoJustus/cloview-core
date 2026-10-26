@@ -42,9 +42,13 @@ its `windows-harness.yml` runs its own Windows harness (steps 01–05) on demand
 by hand, both take a `core_ref` input: the cloview-core branch, tag or commit to test
 against.
 
-None of these workflows has run yet: the repositories are not on GitHub. Making them green is the
-first Stage 3 task for Claude Code (§8). If the hosted Windows runner cannot run a GUI
-step, record why in WINDOWS_VERIFICATION_REPORT.md and move that step to a ticket (§4).
+All four workflows have run on GitHub since 2026-10-26. Both `ci.yml` workflows and
+cloview-examples' `windows-harness.yml` were green that day; cloview-core's
+`windows-harness.yml` is green since the topic `ci/windows-harness-green` gave it the R
+packages of the real-R bridge test and a verdict that fails on any step that is not "ok"
+([topics/ci-windows-harness-green.md](topics/ci-windows-harness-green.md)). If the hosted
+Windows runner cannot run a GUI step, record why in WINDOWS_VERIFICATION_REPORT.md and
+move that step to a ticket (§4).
 
 **Reading CI results without flooding the context:**
 
@@ -56,8 +60,9 @@ gh run download <run-id> -n linux-results      # the JSON summaries (verify/out)
 ```
 
 Every job also writes a Markdown summary (`ops/tools/ci_summary.py`), shown on the run's
-page. Artifacts of a public repository are public; the harness logs hold versions and
-paths, no secrets.
+page. The windows-harness job passes only when every harness step is "ok" (its Verdict
+step, `ci_summary.py --require-ok`), since the harness itself exits 0. Artifacts of a
+public repository are public; the harness logs hold versions and paths, no secrets.
 
 ## 3. Lane 2: your own PC as a self-hosted runner (optional)
 
@@ -210,9 +215,7 @@ For Claude Code, delivering fixes as files (DELIVERY_DESIGN.md):
 For the operator (tickets in `ops/jobs/`):
 
 - `20261026-bb-init-windows`: generate a project for each target, then run its own
-  `bb test`, `bb test:clr` and a timed `bb dev` start;
-- `20261026-r-on-windows`: install R with `jsonlite`, then run the bridge suite so the
-  real-R test runs.
+  `bb test`, `bb test:clr` and a timed `bb dev` start.
 
 For the owner:
 

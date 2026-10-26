@@ -10,7 +10,7 @@ operator (`AGENTS.md`) or by the owner, and returned as **recorded results**. Wh
 | `jobs/<id>.md` | tickets; the id is `YYYYMMDD-short-name` |
 | `results/<id>/` | a recorded result: `result.json`, `logs/`, `artifacts/` (on a results branch, never on `main`) |
 | `tools/result.py` | records steps, checks and packs a result (Python 3, standard library) |
-| `tools/ci_summary.py` | the Markdown summary of `verify/out` that CI shows |
+| `tools/ci_summary.py` | the Markdown summary of `verify/out` that CI shows; with `--require-ok`, also the Windows harness's verdict |
 | `CLAUDECODE_BOOTSTRAP_PROMPT.md` | the prompt that starts a Claude Code session on the web ([`docs/COLLABORATION.md`](../docs/COLLABORATION.md)) |
 
 Recording a ticket:

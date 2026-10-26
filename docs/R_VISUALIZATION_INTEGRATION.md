@@ -9,7 +9,10 @@ Status: **implemented and tested (Approach A2), Stage 2-2b.**
 - The same test then runs the **real** `backend.R` through cloview's launcher. It passed
   on Linux with R 4.3.3 (Ubuntu 24.04 packages: jsonlite 1.8.8, ggplot2 3.4.4, ragg 1.2.7,
   svglite 2.1.3) on Clojure/JVM and on ClojureCLR 1.12.6 and master.
-- Not yet run: Windows, macOS, R 4.6.
+- On Windows the same test passed on 2026-10-26 on GitHub's windows-2025 runner, with
+  R 4.6.1 and CRAN's jsonlite 2.0.0, ggplot2 4.0.3, ragg 1.5.2 and svglite 2.2.2, on
+  Clojure/JVM and on ClojureCLR in the real WPF host (the windows-harness workflow).
+- Not yet run: macOS, and a bundled portable R.
 - Facts were checked on 2026-10-25. The current R release is 4.6.1 (2026-06-24); 4.6.2 is
   due 2026-10-29 ([r-project.org](https://www.r-project.org/)).
 
@@ -269,8 +272,8 @@ it once.
 
 ## 9. Stage 3
 
-1. Run the real-R test on Windows and macOS, both with R 4.6 + ggplot2 4.x and with a
-   bundled portable R (the manifest's Windows command).
+1. Run the real-R test on macOS, and with a bundled portable R (the manifest's Windows
+   command). Windows with an installed R 4.6.1 and ggplot2 4.0.3 passed on 2026-10-26.
 2. Add a `bb` task that assembles a portable R plus a CRAN snapshot into
    `backend/r/R` for a target.
 3. Flutter: the bridge's Dart process transport (`dart:io` `Process.start`), so the same
