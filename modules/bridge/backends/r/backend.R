@@ -8,10 +8,12 @@
 # example plots, ragg (MIT) for PNG, svglite (GPL-2|GPL-3) for SVG; otherwise the
 # grDevices png()/svg() devices that ship with R.
 #
-# STATUS (2026-10-25): run on Linux with R 4.3.3 and Ubuntu 24.04's jsonlite 1.8.8,
+# STATUS (2026-10-26): run on Linux with R 4.3.3 and Ubuntu 24.04's jsonlite 1.8.8,
 # ggplot2 3.4.4, ragg 1.2.7 and svglite 2.1.3, both over a raw pipe and through the
-# cloview launcher on Clojure/JVM and ClojureCLR (modules/bridge/test/.../rplot_test.cljc).
-# Not yet run on Windows or macOS, or with R 4.6 / ggplot2 4.
+# cloview launcher on Clojure/JVM and ClojureCLR (modules/bridge/test/.../rplot_test.cljc);
+# through the launcher also on Windows (GitHub's windows-2025 runner) with R 4.6.1 and
+# CRAN's jsonlite 2.0.0, ggplot2 4.0.3, ragg 1.5.2 and svglite 2.2.2.
+# Not yet run on macOS.
 #
 # The rules every bridge backend follows:
 #   1. answer "$/initialize" with {protocol, name, version, methods};

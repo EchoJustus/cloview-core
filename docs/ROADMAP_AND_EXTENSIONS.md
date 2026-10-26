@@ -10,8 +10,8 @@ it is documented so the V1 design does not block it, not because V1 needs it.
 |---|---|---|---|
 | Canonical views, store, reconcile | ✅ tested on Linux and Windows | ✅ tested on Windows (real WPF), and on Linux with stand-ins that are not shipped | ✅ Greeter widget tests passed on Windows (Flutter 3.47.8, 2026-10-25) |
 | Fitness example (now in [cloview-examples](https://github.com/echojustus/cloview-examples)) | ✅ 37/37 oracles + GUI smoke | ✅ 37/37 oracles + GUI smoke | ✅ 47 Dart tests + 37/37 oracles on Windows (2026-10-25) |
-| `modules/bridge` (Mode B backends) | ✅ incl. real Java and R child processes; on Windows the Java one (no R installed there) | ✅ same, on ClojureCLR 1.12.6 and master, and in the real WPF host on Windows | contract only: the process transport is Stage 3 |
-| `cloview.bridge.rplot` (R plots) | ✅ with real R 4.3.3 (Linux) | ✅ with real R 4.3.3 (Linux) | Stage 3, with the process transport |
+| `modules/bridge` (Mode B backends) | ✅ incl. real Java and R child processes, on Linux and on Windows | ✅ same, on ClojureCLR 1.12.6 and master, and in the real WPF host on Windows | contract only: the process transport is Stage 3 |
+| `cloview.bridge.rplot` (R plots) | ✅ with real R 4.3.3 (Linux) and R 4.6.1 (Windows) | ✅ with real R 4.3.3 (Linux) and R 4.6.1 (Windows, in the real WPF host) | Stage 3, with the process transport |
 | `modules/licensing` | ✅ Linux and Windows | ✅ Linux and Windows (real host) | `install!` refuses: the crypto is Stage 3 |
 | `bb init` project initializer (README, "Start a project") | ✅ generated projects tested (tests in a child JVM, entry points load against cljfx); the initializer's own tests pass on Windows | ⚠️ generated entry points run on ClojureCLR against WPF stand-ins, which exist only in the build sandbox and are not shipped (STAGE_2_2_DECISIONS.md item 39); a real `bb init` → `bb dev` on Windows is still to do | generated and checked statically; the ClojureDart compile of a generated project awaits a Windows run |
 
@@ -39,10 +39,10 @@ details.
    `windows-harness.yml` run on a GitHub-hosted Windows runner. Neither has run yet; the
    repository was not on GitHub when they were written.
 1. **The Windows checks the harness does not cover yet** (WINDOWS_VERIFICATION_REPORT.md
-   §8.5): `bb init` → `bb test` / `bb test:clr` / `bb dev` for each target, R with
-   `jsonlite` on Windows, the Dart reference backend, and visual checks. The Stage 2-2b
-   run itself passed every step. Tickets for them are ready in `ops/jobs/`
-   (DEVELOPMENT_WORKFLOW.md §8).
+   §8.5): `bb init` → `bb test` / `bb test:clr` / `bb dev` for each target, the Dart
+   reference backend, and visual checks; R with `jsonlite` is covered since 2026-10-26
+   (windows-harness). The Stage 2-2b run itself passed every step. Tickets for them are
+   ready in `ops/jobs/` (DEVELOPMENT_WORKFLOW.md §8).
 2. **ClojureDart process transport** (`dart:io` `Process.start`) for
    `cloview.bridge.process`. Then the bridge, R plots and the Dart reference backend
    work on Flutter desktop (POLYGLOT_BACKEND_ARCHITECTURE.md §9).

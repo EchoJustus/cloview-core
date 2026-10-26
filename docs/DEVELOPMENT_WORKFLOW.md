@@ -211,9 +211,7 @@ For Claude Code, delivering fixes as files (DELIVERY_DESIGN.md):
 For the operator (tickets in `ops/jobs/`):
 
 - `20261026-bb-init-windows`: generate a project for each target, then run its own
-  `bb test`, `bb test:clr` and a timed `bb dev` start;
-- `20261026-r-on-windows`: install R with `jsonlite`, then run the bridge suite so the
-  real-R test runs.
+  `bb test`, `bb test:clr` and a timed `bb dev` start.
 
 For the owner:
 
