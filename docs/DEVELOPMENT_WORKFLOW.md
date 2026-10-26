@@ -56,8 +56,9 @@ gh run download <run-id> -n linux-results      # the JSON summaries (verify/out)
 ```
 
 Every job also writes a Markdown summary (`ops/tools/ci_summary.py`), shown on the run's
-page. Artifacts of a public repository are public; the harness logs hold versions and
-paths, no secrets.
+page. The windows-harness job passes only when every harness step is "ok" (its Verdict
+step, `ci_summary.py --require-ok`), since the harness itself exits 0. Artifacts of a
+public repository are public; the harness logs hold versions and paths, no secrets.
 
 ## 3. Lane 2: your own PC as a self-hosted runner (optional)
 
