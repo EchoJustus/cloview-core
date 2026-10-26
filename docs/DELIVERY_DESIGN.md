@@ -32,17 +32,17 @@ on a topic branch it reaches no later session.
 
 | # | Question | Recommendation | Status |
 |---|---|---|---|
-| D1 | What is a delivery? (Q1) | One text file per intended commit: a cover note, the output of `git diff --binary --full-index -M`, an end line (§3.4) | PROPOSED |
-| D2 | How does it become a commit? (Q1) | The owner pastes one guarded `git apply` command, reviews the result in GitHub Desktop and commits there (§3.5) | PROPOSED |
-| D3 | How do both sides agree on a commit? (Q2) | Each change names its branch, its base (a pushed commit, by commit and tree id) and its expected result tree; the owner pushes after each commit; stacking on unpushed changes only on request (§4) | PROPOSED |
-| D4 | Branch lifecycle (Q3) | Long-lived topic branches with a committed scope file, many changes per topic, one change in flight in the working copy; a topic ends with its pull request (§5) | PROPOSED |
-| D5 | Branch names (Q3) | `<area>/<topic>`, the area from a fixed list (§5.4) | PROPOSED |
-| D6 | Unit of review (Q4) | One pull request per topic branch, squash-merged (§6) | PROPOSED |
-| D7 | Commit messages | `<area>: <imperative summary>`, a body that says why, no trailers (§7) | PROPOSED |
-| D8 | Who does what (Q5) | The session drafts, the owner decides and files (§8) | PROPOSED |
-| D9 | Guards for constraint 1 | G1 + G2 + G4 (§2.2) | PROPOSED |
+| D1 | What is a delivery? (Q1) | One text file per intended commit: a cover note, the output of `git diff --binary --full-index -M`, an end line (§3.4) | CHOSEN |
+| D2 | How does it become a commit? (Q1) | The owner pastes one guarded `git apply` command, reviews the result in GitHub Desktop and commits there (§3.5) | CHOSEN |
+| D3 | How do both sides agree on a commit? (Q2) | Each change names its branch, its base (a pushed commit, by commit and tree id) and its expected result tree; the owner pushes after each commit; stacking on unpushed changes only on request (§4) | CHOSEN |
+| D4 | Branch lifecycle (Q3) | Long-lived topic branches with a committed scope file, many changes per topic, one change in flight in the working copy; a topic ends with its pull request (§5) | CHOSEN |
+| D5 | Branch names (Q3) | `<area>/<topic>`, the area from a fixed list (§5.4) | CHOSEN |
+| D6 | Unit of review (Q4) | One pull request per topic branch, squash-merged (§6) | CHOSEN |
+| D7 | Commit messages | `<area>: <imperative summary>`, a body that says why, no trailers (§7) | CHOSEN |
+| D8 | Who does what (Q5) | The session drafts, the owner decides and files (§8) | CHOSEN |
+| D9 | Guards for constraint 1 | G1 + G2 + G4 (§2.2) | CHOSEN |
 | D10 | Dropbox layout | A root per repository: `<DROPBOX>/<repository>/_outbox/<area>/<topic>/NNNN-<slug>.patch`, with `main/` in place of `<area>/<topic>/` for a change committed directly on `main`, and `_inbox` laid out alike (§3.4) | CHOSEN |
-| D11 | Readings of the constraints | I1–I6 as written (§1.2) | PROPOSED |
+| D11 | Readings of the constraints | I1–I6 as written (§1.2) | CHOSEN |
 
 ## 1. The problem and what is fixed
 
