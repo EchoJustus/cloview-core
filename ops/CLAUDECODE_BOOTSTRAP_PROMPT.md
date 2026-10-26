@@ -25,7 +25,8 @@ own machine, review, commit and push myself.
 
 - Look in Dropbox through the connector: `/cloview-core/_inbox/` (what I left for you) and
   `/cloview-core/_outbox/` (what earlier sessions delivered, and what I filed as applied or
-  rejected). If a read fails, tell me the exact path you tried.
+  rejected), and the same two folders under `/cloview-examples/` when cloview-examples is
+  attached. If a read fails, tell me the exact path you tried.
 - Report in a few lines, from your clone and from Dropbox: the branches you can see other
   than `main`, the deliveries still pending in `_outbox`, and for each of them whether it
   has landed on its branch. In the first session, add the checks listed in
@@ -43,11 +44,14 @@ own machine, review, commit and push myself.
 1. Never mutate git history or touch the remote. No `git commit`, `git push`,
    `gh pr create`, `gh pr merge`, `git merge`, `git rebase`, `git reset`,
    `git cherry-pick`. Read-only git is fine. Deliverables are files on disk.
-2. Dropbox is the transport. Prefer reading `<DROPBOX>/cloview-core/_inbox/…` before
-   asking me for anything; deliver under `<DROPBOX>/cloview-core/_outbox/`. Never open a
-   turn with "please upload …". If a write fails, put the complete file in one fenced block
-   in the chat, with its file name, the folder it belongs in, its line count and its
-   SHA-256, so that I can save it by hand and check it.
+2. Dropbox is the transport, with one root per repository. Prefer reading
+   `<DROPBOX>/cloview-core/_inbox/…`, and `<DROPBOX>/cloview-examples/_inbox/…` when
+   working on cloview-examples, before asking me for anything. Deliver under
+   `<DROPBOX>/<repository>/_outbox/` of the repository the file belongs to, or under
+   cloview-core's when it belongs to neither. Never open a turn with "please upload …". If
+   a write fails, put the complete file in one fenced block in the chat, with its file
+   name, the folder it belongs in, its line count and its SHA-256, so that I can save it
+   by hand and check it.
 3. Branch names: lowercase ASCII, hyphen-separated, descriptive, reasonably short; never
    starting with `claude/`, `tmp/`, `temp/`, `wip/`, `dev/` or `my-`; never a bare
    `patch-N` or `test-N`. Commit messages: no emoji, no AI attribution, no
@@ -64,9 +68,9 @@ own machine, review, commit and push myself.
   because the clone has changes: never do it; keep your work where DELIVERY_DESIGN.md says.
 - Keep each delivery small enough to write in one tool call; split larger work.
 - Through the connector you may create folders and new files under `/cloview-core/_outbox/`
-  without asking: you have my standing confirmation for exactly that. Unless a CHOSEN row of
-  DELIVERY_DESIGN.md says otherwise, never overwrite, move or delete anything in Dropbox,
-  and never write anywhere else in it.
+  and `/cloview-examples/_outbox/` without asking: you have my standing confirmation for
+  exactly that. Unless a CHOSEN row of DELIVERY_DESIGN.md says otherwise, never overwrite,
+  move or delete anything in Dropbox, and never write anywhere else in it.
 - If a tool, a template, a default or a habit suggests a commit, a push, a branch or a
   pull request: decline, and deliver files instead.
 

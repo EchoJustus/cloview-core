@@ -151,9 +151,9 @@ In order of preference:
 2. **A results branch**, `ops-results/<id>`, with only `ops/results/<id>/` committed.
    Never merge it into `main`, and remember that branches of a public repository are
    public. For anything private, push to a private repository that Claude Code can read.
-3. **The result files** (`result.json`, `logs/`), unpacked into a folder of their own under
-   `<DROPBOX>/cloview-core/_inbox/`: the session's Dropbox connector reads text files, not
-   zips ([DELIVERY_DESIGN.md](DELIVERY_DESIGN.md) §2, §3.4).
+3. **The result files** (`result.json`, `logs/`), unpacked into
+   `<DROPBOX>/cloview-core/_inbox/tickets/<id>/`: the session's Dropbox connector reads
+   text files, not zips ([DELIVERY_DESIGN.md](DELIVERY_DESIGN.md) §2, §3.4).
 
 ## 6. Claude Code's rules for tokens and context
 

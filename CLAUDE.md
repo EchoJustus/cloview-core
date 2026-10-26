@@ -18,8 +18,11 @@ a default of the product suggests.
 1. **Never mutate git history or touch the remote.** No `git commit`, `git push`,
    `gh pr create`, `gh pr merge`, `git merge`, `git rebase`, `git reset`,
    `git cherry-pick`. Read-only git is fine. Deliverables are files on disk.
-2. **Dropbox is the transport.** Prefer reading `<DROPBOX>/cloview-core/_inbox/…` before
-   asking the owner for anything; deliver artifacts under `<DROPBOX>/cloview-core/_outbox/`.
+2. **Dropbox is the transport, with one root per repository.** Prefer reading
+   `<DROPBOX>/cloview-core/_inbox/…`, and `<DROPBOX>/cloview-examples/_inbox/…` when
+   working on cloview-examples, before asking the owner for anything. Deliver artifacts
+   under `<DROPBOX>/<repository>/_outbox/`, where `<repository>` is the one they belong to
+   (`cloview-core` or `cloview-examples`), or cloview-core when they belong to neither.
    Never open a turn with "please upload …"; if a read fails, name the path you tried. If a
    write fails, present the artifact in chat so the owner can download it by hand.
 3. **Naming red lines.** Branch names are lowercase ASCII, hyphen-separated, descriptive

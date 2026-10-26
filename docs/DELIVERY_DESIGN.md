@@ -41,7 +41,7 @@ on a topic branch it reaches no later session.
 | D7 | Commit messages | `<area>: <imperative summary>`, a body that says why, no trailers (§7) | PROPOSED |
 | D8 | Who does what (Q5) | The session drafts, the owner decides and files (§8) | PROPOSED |
 | D9 | Guards for constraint 1 | G1 + G2 + G4 (§2.2) | PROPOSED |
-| D10 | Dropbox layout | `<DROPBOX>/cloview-core/_outbox/<repository>/<area>/<topic>/NNNN-<slug>.patch`, with `_inbox` laid out alike (§3.4) | PROPOSED |
+| D10 | Dropbox layout | A root per repository: `<DROPBOX>/<repository>/_outbox/<area>/<topic>/NNNN-<slug>.patch`, with `main/` in place of `<area>/<topic>/` for a change committed directly on `main`, and `_inbox` laid out alike (§3.4) | CHOSEN |
 | D11 | Readings of the constraints | I1–I6 as written (§1.2) | PROPOSED |
 
 ## 1. The problem and what is fixed
@@ -56,9 +56,9 @@ sides a reliable name for the commit they are talking about.
 ### 1.1 The hard constraints
 
 1. The session never mutates git history or touches the remote.
-2. Dropbox is the transport: `<DROPBOX>/cloview-core/_inbox/` towards the session,
-   `<DROPBOX>/cloview-core/_outbox/` towards the owner, the chat as the fallback when a
-   write fails.
+2. Dropbox is the transport, one root per repository: `<DROPBOX>/<repository>/_inbox/`
+   towards the session, `<DROPBOX>/<repository>/_outbox/` towards the owner, the chat as
+   the fallback when a write fails.
 3. Naming red lines for branches and commit messages.
 4. Nothing agreed in chat travels forward; what is settled lands in repository files.
 
@@ -86,10 +86,12 @@ Confirm or correct these (D11). Each says what changes under a different reading
   squash merge makes the title the summary line on `main`, and under GitHub's "title and
   description" setting the description becomes the body; keeping both clean keeps every
   setting safe.
-- **I4. `<DROPBOX>` is the Dropbox root.** For the connector the two folders are
-  `/cloview-core/_inbox/` and `/cloview-core/_outbox/`. Deliveries for cloview-examples use
-  the same root (`_outbox/cloview-examples/…`), the literal reading of constraint 2. *A
-  second root, `<DROPBOX>/cloview-examples/`, changes only D10.*
+- **I4. `<DROPBOX>` is the Dropbox root, and each repository has its own folder in it.**
+  For the connector these are `/cloview-core/_inbox/`, `/cloview-core/_outbox/`,
+  `/cloview-examples/_inbox/` and `/cloview-examples/_outbox/`. What belongs to no single
+  repository (handoff notes, ticket results, general notes) goes to cloview-core's root,
+  where every session starts. *Going back to one shared root
+  (`cloview-core/_outbox/<repository>/…`) would change D10 and constraint 2.*
 - **I5. The branch red lines apply to every branch that can reach your machine or
   GitHub.** A session creates no branches at all (I2); the branch named `claude/…` that a
   cloud session starts on is never pushed, never named in a delivery and never leaves the
@@ -238,28 +240,37 @@ not D1.
 ### 3.4 The change file
 
 One file per intended commit, `NNNN-<slug>.patch`. `NNNN` counts the changes of one topic
-from `0001`; `<slug>` is a few words of the commit summary, without its area prefix, in
-lowercase and joined by hyphens. Layout (D10):
+(or of `main/`) from `0001`; `<slug>` is a few words of the commit summary, without its
+area prefix, in lowercase and joined by hyphens. Layout (D10), one root per repository:
 
 ```text
-<DROPBOX>/cloview-core/
-├── _inbox/                          owner → session, text only
-│   ├── cloview-core/core/keyed-lists/   inputs for one topic: harness summaries, logs, notes
-│   ├── tickets/<id>/                result files of a ticket (result.json, logs/)
-│   └── notes/                       anything else
-└── _outbox/                         session → owner
-    ├── cloview-core/
-    │   └── core/keyed-lists/        one folder per topic, named like its branch
-    │       ├── 0001-add-key-index.patch
-    │       ├── 0002-reconcile-keyed-children.patch
-    │       ├── PR.md                the pull request text, when asked for
-    │       ├── applied/             the owner moves a change here after committing it
-    │       └── rejected/            ... or here, after discarding it
-    ├── cloview-examples/
+<DROPBOX>/
+├── cloview-core/                    the root of cloview-core
+│   ├── _inbox/                      owner → session, text only
+│   │   ├── core/keyed-lists/        inputs for one topic: harness summaries, logs, notes
+│   │   ├── tickets/<id>/            result files of a ticket (result.json, logs/)
+│   │   └── notes/                   anything else
+│   └── _outbox/                     session → owner
+│       ├── core/keyed-lists/        one folder per topic, named like its branch
+│       │   ├── 0001-add-key-index.patch
+│       │   ├── 0002-reconcile-keyed-children.patch
+│       │   ├── PR.md                the pull request text, when asked for
+│       │   ├── applied/             the owner moves a change here after committing it
+│       │   └── rejected/            ... or here, after discarding it
+│       ├── main/                    changes to commit directly on main, only when asked
+│       ├── handoff/                 the session's notes at the end of a working session
+│       └── _archive/<area>/<topic>-<YYYY-MM-DD>/   finished topics, moved by the owner
+└── cloview-examples/                laid out alike, without tickets/, notes/ and handoff/
+    ├── _inbox/
     │   └── fitness/calendar-week-view/
-    ├── handoff/                     the session's notes at the end of a working session
-    └── _archive/<repository>/<area>/<topic>-<YYYY-MM-DD>/   finished topics, moved by the owner
+    └── _outbox/
+        └── fitness/calendar-week-view/
 ```
+
+`main/` is for the rare change you ask to have committed directly on `main`, such as a fix
+needed before any topic exists; it has its own `applied/` and `rejected/`. Handoff notes,
+ticket results and general notes belong to no single repository and go to cloview-core's
+root (I4).
 
 A topic's scope is not kept in Dropbox (I6): the topic's first change adds
 `docs/topics/<area>-<topic>.md` to the repository (scope, what is out of scope,
@@ -292,7 +303,7 @@ Not tested here: the WPF host (Windows harness steps 04-06).
 Review hints: the move logic is in reconcile.cljc.
 
 Apply (Git Bash, right-click → Paste):
-cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; f="$CLOVIEW_OUTBOX/cloview-core/core/keyed-lists/0002-reconcile-keyed-children.patch"; if ...
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; f="$CLOVIEW_DROPBOX/cloview-core/_outbox/core/keyed-lists/0002-reconcile-keyed-children.patch"; if ...
 
  modules/core/src/cloview/core/reconcile.cljc | 48 +++++++++++++++++++++-------
  ...
@@ -343,8 +354,9 @@ What the session does, every time:
 
 ### 3.5 Applying a change
 
-Once: the user environment variable `CLOVIEW_OUTBOX` points to the `_outbox` folder in your
-Dropbox, written with forward slashes ([COLLABORATION.md](COLLABORATION.md), Day 1).
+Once: the user environment variable `CLOVIEW_DROPBOX` points to your Dropbox folder, the
+one that holds `cloview-core` and `cloview-examples`, written with forward slashes
+([COLLABORATION.md](COLLABORATION.md), Day 1).
 
 1. In Desktop, the change's branch is checked out (created as the cover note says if the
    topic is new), Fetch and Pull are done, and the Changes tab is empty.
@@ -368,7 +380,7 @@ including from a subdirectory, with the variable unset, and with a CRLF-saved, a
 truncated and a stale file):
 
 ```bash
-cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; f="$CLOVIEW_OUTBOX/cloview-core/core/keyed-lists/0002-reconcile-keyed-children.patch"; if [ ! -f "$f" ]; then echo "NOT APPLIED: no file at $f (is CLOVIEW_OUTBOX set? restart GitHub Desktop after setx)"; elif head -n 1 "$f" | grep -q $'\r'; then echo "NOT APPLIED: the file was saved with Windows line ends; take it from Dropbox again"; elif [ "$(tail -n 1 "$f")" != "End of change 0002." ]; then echo "NOT APPLIED: the change file is incomplete"; elif [ "$(git branch --show-current)" != "core/keyed-lists" ]; then echo "NOT APPLIED: check out core/keyed-lists first"; elif [ -n "$(git status --porcelain)" ]; then echo "NOT APPLIED: commit or discard your local changes first"; elif [ "$(git log -1 --format=%T)" != "<base tree id>" ]; then echo "NOT APPLIED: this branch is not at the base of change 0002. Ask for a rebuild, or apply anyway with: git apply --verbose \"\$f\""; else git apply --verbose "$f" && echo "APPLIED: review change 0002 in GitHub Desktop"; fi
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; f="$CLOVIEW_DROPBOX/cloview-core/_outbox/core/keyed-lists/0002-reconcile-keyed-children.patch"; if [ ! -f "$f" ]; then echo "NOT APPLIED: no file at $f (is CLOVIEW_DROPBOX set? restart GitHub Desktop after setx)"; elif head -n 1 "$f" | grep -q $'\r'; then echo "NOT APPLIED: the file was saved with Windows line ends; take it from Dropbox again"; elif [ "$(tail -n 1 "$f")" != "End of change 0002." ]; then echo "NOT APPLIED: the change file is incomplete"; elif [ "$(git branch --show-current)" != "core/keyed-lists" ]; then echo "NOT APPLIED: check out core/keyed-lists first"; elif [ -n "$(git status --porcelain)" ]; then echo "NOT APPLIED: commit or discard your local changes first"; elif [ "$(git log -1 --format=%T)" != "<base tree id>" ]; then echo "NOT APPLIED: this branch is not at the base of change 0002. Ask for a rebuild, or apply anyway with: git apply --verbose \"\$f\""; else git apply --verbose "$f" && echo "APPLIED: review change 0002 in GitHub Desktop"; fi
 ```
 
 The base check comes last on purpose: when it fails, every other check has passed, so the
@@ -745,7 +757,7 @@ below), or towards B for messages if you want your own voice in the history.
 - Rebuild a change that no longer applies; never ask you to merge by hand.
 - Keep topics apart (T5, T6) and say when a request does not fit the current topic.
 - Read `_inbox` before asking you for anything, and name the exact path when a read fails.
-- End each working session with a handoff note in `_outbox/handoff/`.
+- End each working session with a handoff note in cloview-core's `_outbox/handoff/`.
 
 ### 8.4 Negotiable (default first)
 
@@ -778,8 +790,8 @@ session reports each one before its first delivery, using only reads:
 
 - **Results of the ticket lane** (DEVELOPMENT_WORKFLOW.md §5) travel on `ops-results/<id>`
   branches or as a zip. A session reads neither a zip (F9) nor a branch it does not know
-  about. Proposal: the result files, unpacked, in `_inbox/tickets/<id>/`; to be decided
-  separately.
+  about. Proposal: the result files, unpacked, in cloview-core's `_inbox/tickets/<id>/`,
+  the folder D10 provides; which route comes first is still to be decided.
 - **CI before a pull request.** Today a pushed topic branch runs nothing unless you start
   `ci.yml` by hand. If topics grow long, a `push` trigger for all branches is the fix.
 - **Larger files.** If the connector's ceiling (F9) becomes the bottleneck, a byte-exact
