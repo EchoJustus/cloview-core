@@ -21,3 +21,8 @@ python ops/tools/result.py step   <id> --title "<title>" [--cwd DIR] -- <command
 python ops/tools/result.py finish <id> [--note "<fact>"]
 python ops/tools/result.py pack   <id>        # ops/results/<id>.zip
 ```
+
+Retiring a ticket: once its question is answered, a change records the answer where it
+belongs (a status text, a decision) and deletes the ticket. The ticket is archived first,
+outside the repository, in cloview-core's `retired/` folder
+([`docs/DELIVERY_DESIGN.md`](../docs/DELIVERY_DESIGN.md) §3.4).

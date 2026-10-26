@@ -41,7 +41,7 @@ on a topic branch it reaches no later session.
 | D7 | Commit messages | `<area>: <imperative summary>` and a body that says why, drafted by the session without trailers; trailers are the owner's, and the session never checks, flags, changes or limits them (§7) | CHOSEN |
 | D8 | Who does what (Q5) | The session drafts, the owner decides and files (§8) | CHOSEN |
 | D9 | Guards for constraint 1 | G1 + G2 + G4 (§2.2) | CHOSEN |
-| D10 | Dropbox layout | A root per repository: `<DROPBOX>/<repository>/_outbox/<area>/<topic>/NNNN-<slug>.patch`, with `main/` in place of `<area>/<topic>/` for a change committed directly on `main`, and `_inbox` laid out alike (§3.4) | CHOSEN |
+| D10 | Dropbox layout | A root per repository: `<DROPBOX>/<repository>/_outbox/<area>/<topic>/NNNN-<slug>.patch`, with `main/` in place of `<area>/<topic>/` for a change committed directly on `main`, and `_inbox` laid out alike; retired job tickets, archived before their deletion from `ops/jobs/`, in `<DROPBOX>/cloview-core/retired/`, outside the repository (§3.4) | CHOSEN |
 | D11 | Readings of the constraints | I1–I6 as written (§1.2) | CHOSEN |
 
 ## 1. The problem and what is fixed
@@ -252,6 +252,9 @@ area prefix, in lowercase and joined by hyphens. Layout (D10), one root per repo
 │   │   ├── core/keyed-lists/        inputs for one topic: harness summaries, logs, notes
 │   │   ├── tickets/<id>/            result files of a ticket (result.json, logs/)
 │   │   └── notes/                   anything else
+│   ├── retired/                     job tickets deleted from ops/jobs/ (below)
+│   │   ├── RETIRED.md               one row per retired ticket
+│   │   └── jobs/<id>.md             the ticket as last committed, byte for byte
 │   └── _outbox/                     session → owner
 │       ├── core/keyed-lists/        one folder per topic, named like its branch
 │       │   ├── 0001-add-key-index.patch
@@ -262,7 +265,7 @@ area prefix, in lowercase and joined by hyphens. Layout (D10), one root per repo
 │       ├── main/                    changes to commit directly on main, only when asked
 │       ├── handoff/                 the session's notes at the end of a working session
 │       └── _archive/<area>/<topic>-<YYYY-MM-DD>/   finished topics, moved by the owner
-└── cloview-examples/                laid out alike, without tickets/, notes/ and handoff/
+└── cloview-examples/                laid out alike, without tickets/, notes/, handoff/, retired/
     ├── _inbox/
     │   └── fitness/calendar-week-view/
     └── _outbox/
@@ -273,6 +276,18 @@ area prefix, in lowercase and joined by hyphens. Layout (D10), one root per repo
 needed before any topic exists; it has its own `applied/` and `rejected/`. Handoff notes,
 ticket results and general notes belong to no single repository and go to cloview-core's
 root (I4).
+
+`retired/` keeps the job tickets that have been deleted from `ops/jobs/`; the repositories
+have no such directory. Before a change deletes a ticket, the ticket as last committed
+(`git show <commit>:ops/jobs/<id>.md`) is copied byte for byte to `retired/jobs/<id>.md`,
+under its own id, and confirmed by `content_hash`; it is never retyped. `RETIRED.md` has
+one row per ticket: the ticket, the retirement date, the change that deleted it, where its
+conclusion now lives, and the answer in one line. The connector cannot edit a file (F9),
+so the session creates `RETIRED.md` only when it does not exist yet; for a later ticket
+the deleting change's cover note carries the ready row, and the owner or the local
+assistant adds it. Dated records
+such as `docs/WINDOWS_VERIFICATION_REPORT.md` are not retired this way: they stay in the
+repository, where other files cite them.
 
 A topic's scope is not kept in Dropbox (I6): the topic's first change adds
 `docs/topics/<area>-<topic>.md` to the repository (scope, what is out of scope,
