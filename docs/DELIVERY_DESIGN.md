@@ -38,7 +38,7 @@ on a topic branch it reaches no later session.
 | D4 | Branch lifecycle (Q3) | Long-lived topic branches with a committed scope file, many changes per topic, one change in flight in the working copy; a topic ends with its pull request (§5) | CHOSEN |
 | D5 | Branch names (Q3) | `<area>/<topic>`, the area from a fixed list (§5.4) | CHOSEN |
 | D6 | Unit of review (Q4) | One pull request per topic branch, squash-merged (§6) | CHOSEN |
-| D7 | Commit messages | `<area>: <imperative summary>`, a body that says why, no trailers (§7) | CHOSEN |
+| D7 | Commit messages | `<area>: <imperative summary>` and a body that says why, drafted by the session without trailers; trailers are the owner's, and the session never checks, flags, changes or limits them (§7) | CHOSEN |
 | D8 | Who does what (Q5) | The session drafts, the owner decides and files (§8) | CHOSEN |
 | D9 | Guards for constraint 1 | G1 + G2 + G4 (§2.2) | CHOSEN |
 | D10 | Dropbox layout | A root per repository: `<DROPBOX>/<repository>/_outbox/<area>/<topic>/NNNN-<slug>.patch`, with `main/` in place of `<area>/<topic>/` for a change committed directly on `main`, and `_inbox` laid out alike (§3.4) | CHOSEN |
@@ -79,9 +79,11 @@ Confirm or correct these (D11). Each says what changes under a different reading
   directories or add unreferenced objects**: `status`, `log`, `show`, `diff`, `ls-tree`,
   `rev-parse`, `worktree add --detach`, `apply --check`, and building a patch through a
   throwaway index (§3.4). The session never creates, moves or deletes a branch or a tag
-  and never edits `.git/config`. *If even the throwaway index is too much, new files can
-  be diffed one at a time with `git diff --no-index`; the result is the same, the
-  procedure clumsier.*
+  and never edits `.git/config`. Read-only git holds in scratch repositories too: the
+  session makes no commit anywhere in the VM, not even in a throwaway repository, and
+  never switches the hooks off (no `--no-verify`, no other `core.hooksPath`). *If even the
+  throwaway index is too much, new files can be diffed one at a time with
+  `git diff --no-index`; the result is the same, the procedure clumsier.*
 - **I3. The commit-message red lines also bind pull request titles and descriptions.** A
   squash merge makes the title the summary line on `main`, and under GitHub's "title and
   description" setting the description becomes the body; keeping both clean keeps every
@@ -121,7 +123,7 @@ repositories. The git experiments used the settings GitHub Desktop has on Window
 | F6 | The Changes card and the diff view of a session appear "after Claude pushes its changes to a branch". | Not available in this flow. Review happens in GitHub Desktop. |
 | F7 | An idle session stops and "the session's VM is reclaimed"; reopening restores the conversation, not running work. Waiting for the approval of an MCP connector call counts as idle. | Whatever has not reached Dropbox can be lost: the session delivers at every stopping point. Approve the Dropbox tool promptly. |
 | F8 | The VM ships OpenJDK 21, git and `gh`, but no Clojure CLI and no .NET SDK, and clojars.org is not on the default network allowlist. An environment's setup script runs as root and can also write `~/.claude/CLAUDE.md`, which every session of that environment then loads. | The session runs the Linux checks only after a setup script and a custom allowlist ([COLLABORATION.md](COLLABORATION.md), Day 1); the same script can carry G1 and G4. |
-| F9 | The Dropbox connector's `create_file` creates a new UTF-8 text file from a JSON string, at most 5 MB, in an existing folder, and warns against content "that must preserve control bytes". `fetch` reads text up to 5 MiB. The connector can neither overwrite nor edit a file, and cannot upload a binary one. The content is an argument of the tool call, which the session writes out as its own output; output per response is limited ("defaults and caps vary by model"; 32,000 tokens by default for a model Claude Code does not recognise). | A delivery must be one file of ordinary text, and its practical size is set by one response's output, far below 5 MB: on the order of 100 KB of diff text, less for binary content (§3.4). Because the session copies the file into the call itself, it compares the read-back with its local file byte for byte. Patches here contain no CR bytes, since the repositories store text with LF (frozen `-text` paths excepted). Status cannot live in a file the session rewrites: it lives in git and in where you move files. |
+| F9 | The Dropbox connector's `create_file` creates a new UTF-8 text file from a JSON string, at most 5 MB, in an existing folder, and warns against content "that must preserve control bytes". `fetch` reads text up to 5 MiB. The connector can neither overwrite nor edit a file, and cannot upload a binary one. The content is an argument of the tool call, which the session writes out as its own output; output per response is limited ("defaults and caps vary by model"; 32,000 tokens by default for a model Claude Code does not recognise). Checked in the first session (§9): a test file of 49,936 bytes (a real diff, the binary patch of a new 3000-byte file and a Clojure file), the largest tried, came back byte for byte; the tool layer decodes `\u` followed by four hex digits in every tool argument, the session's own Write, Edit and Bash tools included, whenever that backslash ends a run of backslashes of odd length (the text `\u00fc` and the end of `\\\u00fc` arrived as `ü`, `\\u00fc` arrived unchanged), while other escapes, tabs, trailing spaces and non-ASCII text arrive unchanged; the session's own copy dropped a character (a run of 300 `x` arrived as 299); `download_link` returns the file's `content_hash`, which for a non-empty file under 4 MiB is the SHA-256 of the raw 32-byte SHA-256 digest of its bytes. | A delivery must be one file of ordinary text, and its practical size is set by one response's output, far below 5 MB: 50 KB is verified, which is not the ceiling (§3.4). The session escapes every sequence the tool layer would decode (§3.4). Because the session copies the file into the call itself, the read-back check is mandatory: it compares the file's `content_hash` with the same hash of its local file (§3.4). Patches here contain no CR bytes, since the repositories store text with LF (frozen `-text` paths excepted). Status cannot live in a file the session rewrites: it lives in git and in where you move files. |
 | F10 | When two edits of a Dropbox file clash, Dropbox keeps both and renames one a "conflicted copy"; it does not merge. | Nobody edits a delivered file, names are unique, and no git working copy lives inside Dropbox. |
 | F11 | GitHub Desktop cannot apply a patch; its maintainers declined the feature because "our focus is on the pull request development flow" (desktop#16417). Its bundled Git sits in a versioned folder inside the application and is not on PATH: a shell opened from Desktop without a separate Git reports "Unable to locate Git" (desktop#15160, #22821). | The one extra install is Git for Windows, used for one command per change. |
 | F12 | When Desktop commits it first clears the staging area, because "our diffs reflect the difference between the working directory and the last commit (if any) so our commits should do the same thing", then stages the files you selected. | Anything staged beforehand, for example by `git apply --index`, is ignored. With `core.fileMode=false` an executable bit added by a change never reaches a Desktop commit (verified: mode 100755 became 100644). Changes therefore never change file modes. |
@@ -131,7 +133,7 @@ repositories. The git experiments used the settings GitHub Desktop has on Window
 | F16 | `git apply` reads working-tree files through the `.gitattributes` conversion and writes them back the same way. | One patch serves the LF session and a Windows checkout with CRLF scripts (verified with a `.ps1` change). |
 | F17 | `git diff --full-index` records the full blob ids before and after each file. For binary files git checks both ids when applying (verified: a wrong result id makes it refuse the whole patch). `git apply --3way` uses the ids to fall back to a three-way merge when those blobs exist locally; it implies `--index`, so it stages the result and can leave unmerged entries. | Conflicts can be resolved locally, but how Desktop presents unmerged entries left by `--3way` is untested: a rebuild by the session is the default (§4.4). |
 | F18 | `git apply` ignores text before the first `diff --git` header and after the last hunk (verified, even with a cover-note line shaped like a `---`/`+++` header). It refuses a patch file saved with CRLF line ends ("git diff header lacks filename information") and tolerates blank context lines whose single space was stripped. | Cover note, diff and end line fit in one file, and the usual ways of damaging the file fail safely. |
-| F19 | Web sessions install a Stop hook, `~/.claude/stop-hook-git-check.sh`, that refuses to let the session stop while the repository has modified, staged or untracked files or unpushed commits, and it is reinstalled in every session (reported in anthropics/claude-code#86379, unanswered). | The session keeps its main checkout clean: it edits only in detached worktrees outside it and writes every scratch file outside the repository (§3.4), so the hook has nothing to object to. It never commits to satisfy the hook. The first session confirms this (§9). |
+| F19 | Web sessions install a Stop hook, `~/.claude/stop-hook-git-check.sh`, that refuses to let the session stop while the repository has modified, staged or untracked files or unpushed commits, and it is reinstalled in every session (reported in anthropics/claude-code#86379, unanswered). | The session keeps its main checkout clean: it edits only in detached worktrees outside it and writes every scratch file outside the repository (§3.4), so the hook has nothing to object to. It never commits to satisfy the hook. The first session confirmed this (§9). |
 
 ### 2.2 Making constraint 1 hold (D9)
 
@@ -315,9 +317,10 @@ End of change 0002.
 ```
 
 Size: plan for change files of up to about 50 KB (a few hundred changed lines, or a binary
-file of a few tens of KB). The first session measures the real ceiling (§9) and records it
-here; larger work is split into more changes, and larger binary files need another route
-(§10).
+file of a few tens of KB). The first session verified 50 KB (§9): a test file of 49,936
+bytes (a real diff, the binary patch of a new 3000-byte file and a Clojure file) came back
+byte for byte. That is not the ceiling, which has not been measured; larger work is split
+into more changes, and larger binary files need another route (§10).
 
 What the session does, every time:
 
@@ -345,9 +348,28 @@ What the session does, every time:
   checks that the resulting tree equals Result tree; it checks the size, that the diff has
   no mode changes, no symlinks and no CR bytes outside frozen `-text` paths, and the commit
   message against the red lines.
-- **After writing the file to Dropbox**, it reads it back with the connector and compares it
-  with its local copy byte for byte (a long result may arrive as a saved file; compare
-  that). A mismatch means writing it again.
+- **It escapes for the transport.** The tool layer decodes `\u` followed by four hex
+  digits in every tool argument, the session's own Write, Edit and Bash tools included,
+  whenever the backslash before the `u` is unpaired, that is, ends a run of backslashes of
+  odd length: `\u00fc` and the end of `\\\u00fc` would arrive as `ü`, while
+  `\\u00fc` arrives unchanged. So in the content it passes to the connector the session
+  writes the last backslash of every odd run as `\u005c` and leaves even runs alone
+  (`\u005cu00fc` arrives as `\u00fc`, and `\\\u005cu00fc` as `\\\u00fc`;
+  verified), and it changes files that contain such sequences with a script that builds
+  the backslash (Python `chr(92)`), not with its edit tools. Other backslash escapes,
+  tabs, trailing spaces and non-ASCII text arrive unchanged.
+- **After writing the file to Dropbox**, it confirms the file byte for byte, every time:
+  the connector's `download_link` returns the file's `content_hash`, which for a
+  non-empty file under 4 MiB is the SHA-256 of the raw 32-byte SHA-256 digest of its
+  bytes, not of its hex text (Python:
+  `hashlib.sha256(hashlib.sha256(data).digest()).hexdigest()`), and the session compares
+  it with the same hash of its local file. The check is mandatory because the session
+  copies the file into the call itself and can lose characters (observed: a run of 300
+  `x` arrived as 299); `fetch` returns extracted text, not bytes, and is no substitute.
+  Only a match makes the change ready; after a mismatch the session says so and delivers
+  the change again under the next number, with "Supersedes NNNN". The escape and this
+  check apply to every file the session writes to Dropbox (`PR.md`, handoff notes): none
+  is reported ready before its hash matches.
 - **It never edits or reuses a delivered file.** A correction gets a new number and the line
   "Supersedes NNNN".
 - The cover note never contains a line starting with `diff --git`, `--- `, `+++ ` or `@@`.
@@ -412,7 +434,7 @@ tests mean something: your files are the files it built on.
   that Desktop does not do; the cover note gives the commands.
 - **Frozen content**: `benchmarks/fitness-baseline/` and the reference-core copy in
   cloview-examples are never part of a change (that repository's `CLAUDE.md`). Their CRLF
-  files are also the one kind of text the connector might alter (F9).
+  files are also text the transport might alter (F9).
 
 ## 4. Q2: synchronisation
 
@@ -686,23 +708,22 @@ Candidates:
 
 Recommendation: **the area prefix**, with the areas of the branch names; the summary in
 the imperative, at most 72 characters; a body wrapped at 72 that says why and what changes
-for users; no trailers of any kind. With squash merges the pull request title becomes the
-summary line on `main` and, with the recommended setting, the change commits' messages its
-body; the area keeps seven modules apart when you scan the history.
+for users. The session drafts the summary and the body only and never adds trailers;
+trailers are the owner's. With squash merges the pull request title becomes the summary
+line on `main` and, with the recommended setting, the change commits' messages its body;
+the area keeps seven modules apart when you scan the history.
 
 *Overrule with Conventional Commits* if you plan to derive versions or changelogs from the
 history; tools read summary lines, so with squash merges only pull request titles need the
 format.
 
-Where the red lines bite in practice:
+Who writes what:
 
-- Desktop's co-authors field adds `Co-Authored-By` trailers: leave it empty.
-- GitHub credits "every commit author in the pull request as a co-author on the squash
-  commit". All commits here are yours, so it adds nobody; read the message in the merge
-  dialog anyway.
 - The session drafts every summary, description and pull request text, and checks them for
   emoji, attribution and remarks about how the change was produced before delivering. It
-  never mentions change numbers, Dropbox or itself in them.
+  never mentions change numbers, Dropbox or itself in them, and it never adds trailers.
+- Trailers are the owner's, added when the owner commits (`Signed-off-by`, for example).
+  The session never checks, flags, changes or limits the trailers in the owner's commits.
 
 ## 8. Q5: who does what (D8)
 
@@ -750,8 +771,8 @@ below), or towards B for messages if you want your own voice in the history.
 - Deliver one change file per intended commit, with its cover note, in the topic's folder;
   never edit or reuse a delivered file.
 - Verify each change before delivering it: it applies at its base and gives Result tree,
-  the Linux checks ran and are reported, the red lines hold, the size fits; read it back
-  after writing.
+  the Linux checks ran and are reported, the red lines hold, the size fits, the transport
+  escape is in place; confirm it by `content_hash` after writing.
 - Draft topics and their scope files, branch names and commit messages within the red
   lines.
 - Rebuild a change that no longer applies; never ask you to merge by hand.
@@ -785,6 +806,13 @@ session reports each one before its first delivery, using only reads:
 - the toolchain: `clojure -M:test` runs (F8);
 - the connector: the largest change file it can write and read back unchanged, starting
   with a test file in `_outbox/` (F9); the result goes into §3.4.
+
+Result of the first session (2026-10-26): G4 is in place (`core.hooksPath` from
+`/etc/gitconfig`, four hooks that exit 1) and G1 loaded at launch; G2 cannot be checked by
+reads, and the owner checks the App's repository access. The Stop hook exists and exits 0
+in clean checkouts. Clojure CLI 1.12.6.1673 and OpenJDK 21 run `clojure -M:test` (136
+tests, 0 failures). The connector results are in F9 and §3.4: 50 KB verified, not the
+ceiling; the `\u` escape; the `content_hash` read-back.
 
 ## 10. Open points, and what would change my mind
 
@@ -825,7 +853,6 @@ Read 2026-10-26.
   [options for managing commits](https://docs.github.com/en/enterprise-server@3.22/desktop/managing-commits/options-for-managing-commits-in-github-desktop),
   [creating a pull request from Desktop](https://docs.github.com/en/enterprise-cloud@latest/desktop/working-with-your-remote-repository-on-github-or-github-enterprise/creating-an-issue-or-pull-request-from-github-desktop)
   (F14); [configuring commit squashing](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/configuring-commit-squashing-for-pull-requests)
-  and the changelog on [attribution when squashing](https://github.blog/changelog/2019-12-19-improved-attribution-when-squashing-commits/)
   (§6.4, §7).
 - GitHub Desktop issues and pull requests: [#16417](https://github.com/desktop/desktop/issues/16417)
   (applying a diff, declined), [#15160](https://github.com/desktop/desktop/issues/15160)
