@@ -1,0 +1,408 @@
+;; SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
+(ns cloview.flutter.material
+  "The ONLY cloview namespace that imports Flutter UI libraries.
+
+  Flutter 3.47 starts moving Material/Cupertino out of the SDK into the opt-in
+  `material_ui` / `cupertino_ui` packages (in-SDK Material deprecation announced for
+  November). Every widget and value cloview creates goes through the functions below,
+  so migrating means changing the requires of this file (and adding the package to the
+  app's pubspec) — nothing else.
+
+  The functions take plain Clojure values (numbers, keywords, maps, fns) and return
+  Flutter objects, converting numbers to doubles/ints where Flutter's signatures demand
+  it. Nullable Flutter parameters receive nil when a value is absent."
+  (:require ["package:flutter/material.dart" :as m]
+            ["dart:io" :as io]))
+
+(def infinity (/ 1.0 0.0))
+
+;; ---------------------------------------------------------------------------
+;; Values
+
+(defn color
+  "Flutter Color from a 0xAARRGGBB integer (see cloview.core.color/argb-int)."
+  [argb]
+  (m/Color (int argb)))
+
+(defn insets
+  "EdgeInsets from a normalized {:top :right :bottom :left} map."
+  [{:keys [top right bottom left]}]
+  (m/EdgeInsets.fromLTRB (double left) (double top) (double right) (double bottom)))
+
+(defn font-weight [w]
+  (case (int w)
+    100 m/FontWeight.w100
+    200 m/FontWeight.w200
+    300 m/FontWeight.w300
+    500 m/FontWeight.w500
+    600 m/FontWeight.w600
+    700 m/FontWeight.w700
+    800 m/FontWeight.w800
+    900 m/FontWeight.w900
+    m/FontWeight.w400))
+
+(defn text-align [a]
+  (case a
+    :center m/TextAlign.center
+    :end m/TextAlign.end
+    m/TextAlign.start))
+
+(defn text-style
+  "TextStyle from a map with :color (argb int) :font-size :font-weight (100-900)
+  :font-family :italic?; nil when the map is empty."
+  [{:keys [color font-size font-weight font-family italic?] :as ts}]
+  (when (seq ts)
+    (m/TextStyle
+     .color (when color (m/Color (int color)))
+     .fontSize (when font-size (double font-size))
+     .fontWeight (when font-weight (cloview.flutter.material/font-weight font-weight))
+     .fontStyle (when italic? m/FontStyle.italic)
+     .fontFamily font-family)))
+
+(defn box-decoration
+  "BoxDecoration from :background :border-color (argb ints) :border-width :radius."
+  [{:keys [background border-width border-color radius]}]
+  (m/BoxDecoration
+   .color (when background (m/Color (int background)))
+   .border (when border-width
+             (m/Border.all .color (m/Color (int (or border-color 0xFF000000)))
+                           .width (double border-width)))
+   .borderRadius (when radius (m/BorderRadius.circular (double radius)))))
+
+(defn alignment
+  "Alignment from one of :top-left :top :top-right :left :center :right :bottom-left
+  :bottom :bottom-right."
+  [a]
+  (case a
+    :top-left m/Alignment.topLeft
+    :top m/Alignment.topCenter
+    :top-right m/Alignment.topRight
+    :left m/Alignment.centerLeft
+    :right m/Alignment.centerRight
+    :bottom-left m/Alignment.bottomLeft
+    :bottom m/Alignment.bottomCenter
+    :bottom-right m/Alignment.bottomRight
+    m/Alignment.center))
+
+(defn value-key [k] (m/ValueKey k))
+
+;; ---------------------------------------------------------------------------
+;; Basic wrappers
+
+(defn empty-box [] (m/SizedBox.shrink))
+
+(defn text [s style align wrap?]
+  (m/Text (str s)
+          .style style
+          .textAlign align
+          .softWrap (if (false? wrap?) false true)))
+
+(defn padding [ins child] (m/Padding .padding ins .child child))
+
+(defn decorated [deco child] (m/DecoratedBox .decoration deco .child child))
+
+(defn opacity [o child] (m/Opacity .opacity (double o) .child child))
+
+(defn sized [w h child]
+  (m/SizedBox .width (when w (double w)) .height (when h (double h)) .child child))
+
+(defn constrained [{:keys [min-width max-width min-height max-height]} child]
+  (m/ConstrainedBox
+   .constraints (m/BoxConstraints
+                 .minWidth (double (or min-width 0.0))
+                 .maxWidth (double (or max-width infinity))
+                 .minHeight (double (or min-height 0.0))
+                 .maxHeight (double (or max-height infinity)))
+   .child child))
+
+(defn keyed [k child] (m/KeyedSubtree .key (value-key k) .child child))
+
+(defn expanded [flex child] (m/Expanded .flex (int flex) .child child))
+
+(defn align [a child] (m/Align .alignment (alignment a) .child child))
+
+(defn intrinsic-height [child] (m/IntrinsicHeight .child child))
+
+(defn- main-axis [justify]
+  (case justify
+    :center m/MainAxisAlignment.center
+    :end m/MainAxisAlignment.end
+    m/MainAxisAlignment.start))
+
+(defn- cross-axis [align]
+  (case align
+    :start m/CrossAxisAlignment.start
+    :center m/CrossAxisAlignment.center
+    :end m/CrossAxisAlignment.end
+    m/CrossAxisAlignment.stretch))
+
+(defn column [{:keys [gap justify align]} children]
+  (m/Column .mainAxisAlignment (main-axis justify)
+            .crossAxisAlignment (cross-axis align)
+            .spacing (double (or gap 0))
+            .children children))
+
+(defn row [{:keys [gap justify align]} children]
+  (m/Row .mainAxisAlignment (main-axis justify)
+         .crossAxisAlignment (cross-axis align)
+         .spacing (double (or gap 0))
+         .children children))
+
+(defn wrap
+  "Flow layout: children left to right, wrapping into runs."
+  [{:keys [gap run-gap]} children]
+  (m/Wrap .spacing (double (or gap 0))
+          .runSpacing (double (or run-gap gap 0))
+          .children children))
+
+(defn fill-width
+  "`child` stretched to the full available width (grid cells, like WPF and JavaFX)."
+  [child]
+  (m/SizedBox .width infinity .child child))
+
+(defn scroll [direction child]
+  (m/SingleChildScrollView
+   .scrollDirection (if (= direction :horizontal) m/Axis.horizontal m/Axis.vertical)
+   .child child))
+
+(defn indexed-stack [index children]
+  (m/IndexedStack .index (int index) .children children))
+
+;; ---------------------------------------------------------------------------
+;; Grid (Table)
+
+(defn definite-track?
+  "True for a grid track with a definite width (px or {:fr n}); anything else is
+  intrinsic (sized to its content)."
+  [track]
+  (or (number? track) (and (map? track) (some? (:fr track)))))
+
+(defn table
+  "Table from rows of cell widgets (every row the same length) and a vector of column
+  track specs (:auto, a number of px, or {:fr n})."
+  [rows tracks]
+  (m/Table
+   .defaultVerticalAlignment m/TableCellVerticalAlignment.middle
+   .columnWidths (into {}
+                       (map-indexed
+                        (fn [i track]
+                          [i (cond
+                               (number? track) (m/FixedColumnWidth (double track))
+                               (definite-track? track) (m/FlexColumnWidth (double (:fr track)))
+                               :else (m/IntrinsicColumnWidth))]))
+                       tracks)
+   .children (mapv (fn [cells] (m/TableRow .children cells)) rows)))
+
+;; ---------------------------------------------------------------------------
+;; Controls
+
+(defn button [label on-pressed enabled?]
+  (m/ElevatedButton
+   .onPressed (when enabled? on-pressed)
+   .child (m/Text (str label))))
+
+(defn checkbox [checked on-changed enabled?]
+  (m/Checkbox .value (boolean checked)
+              .onChanged (when enabled? on-changed)))
+
+(defn switch-control [checked on-changed enabled?]
+  (m/Switch .value (boolean checked)
+            .onChanged (when enabled? on-changed)))
+
+(defn filter-chip
+  "Material FilterChip: a toggle chip showing its selected state with a check mark."
+  [label selected? on-selected enabled?]
+  (m/FilterChip .label (m/Text (str label))
+                .selected (boolean selected?)
+                .onSelected (when enabled? on-selected)))
+
+(defn labelled
+  "A control followed by its label, sized to its content."
+  [control label]
+  (m/Row .mainAxisSize m/MainAxisSize.min
+         .children (if (some? label) [control (m/Text (str label))] [control])))
+
+(defn dropdown
+  "Index-based DropdownButton: `labels` vector, `selected` index (or nil),
+  `on-changed` receives the picked index."
+  [labels selected placeholder on-changed enabled?]
+  ;; explicit <int> type arguments: Dart generics are reified, so the button and its
+  ;; items must agree on T (see ClojureDart doc/GENERICS.md for the #/ notation)
+  (#/(m/DropdownButton int)
+   .isExpanded true
+   .value (when (some? selected) (int selected))
+   .hint (when placeholder (m/Text (str placeholder)))
+   .items (vec (map-indexed (fn [i l] (#/(m/DropdownMenuItem int) .value (int i) .child (m/Text (str l))))
+                            labels))
+   .onChanged (when enabled? (fn [^int? i] (on-changed i) nil))))
+
+(defn- box-fit [fit]
+  (case fit
+    :cover m/BoxFit.cover
+    :fill m/BoxFit.fill
+    m/BoxFit.contain))
+
+(defn image
+  "Image from a canonical :src map ({:asset} {:file} {:url}); empty box when nil."
+  [src fit w h]
+  (let [w (when w (double w))
+        h (when h (double h))]
+    (cond
+      (:asset src) (m/Image.asset (str (:asset src)) .fit (box-fit fit) .width w .height h)
+      (:file src) (m/Image.file (io/File (str (:file src))) .fit (box-fit fit) .width w .height h)
+      (:url src) (m/Image.network (str (:url src)) .fit (box-fit fit) .width w .height h)
+      :else (m/SizedBox .width w .height h))))
+
+;; ---------------------------------------------------------------------------
+;; Text editing (used by cloview.flutter.text-input)
+
+(defn ^m/TextEditingController text-editing-controller [text]
+  (m/TextEditingController .text (str text)))
+
+(defn controller-text [^m/TextEditingController c] (.-text c))
+
+(defn controller-value [^m/TextEditingController c] (.-value c))
+
+(defn set-controller-value! [^m/TextEditingController c ^m/TextEditingValue v]
+  (.-value! c v)
+  nil)
+
+(defn external-editing-value
+  "TextEditingValue for an external (programmatic) write of `text` over `old`:
+  selection clamped to the new length (an invalid selection moves to the end) and the
+  IME composing range kept only when it is still valid and covers unchanged text."
+  [^m/TextEditingValue old ^String text]
+  (let [n (count text)
+        clamp (fn [i] (if (or (< i 0) (> i n)) n i))
+        sel (.-selection old)
+        comp (.-composing old)
+        old-text (.-text old)
+        keep-comp? (and (.-isValid comp)
+                        (<= (.-end comp) n)
+                        (<= (.-end comp) (count old-text))
+                        (= (subs old-text (.-start comp) (.-end comp))
+                           (subs text (.-start comp) (.-end comp))))]
+    (m/TextEditingValue
+     .text text
+     .selection (m/TextSelection .baseOffset (clamp (.-baseOffset sel))
+                                 .extentOffset (clamp (.-extentOffset sel)))
+     .composing (if keep-comp? comp m/TextRange.empty))))
+
+(defn text-field
+  [controller {:keys [placeholder on-changed on-submitted obscure? enabled? style]}]
+  (m/TextField
+   .controller controller
+   .decoration (m/InputDecoration .hintText (when placeholder (str placeholder)))
+   .onChanged on-changed
+   .onSubmitted on-submitted
+   .obscureText (boolean obscure?)
+   .enabled (if (false? enabled?) false true)
+   .style style))
+
+(defn post-frame!
+  "Run (f) after the current frame (never during build)."
+  [f]
+  (m/WidgetsBinding.instance.addPostFrameCallback (fn [_] (f) nil))
+  nil)
+
+;; ---------------------------------------------------------------------------
+;; Tabs (used by cloview.flutter.adapters)
+
+(defn ^m/TabController tab-controller [length vsync index]
+  (m/TabController .length (int length) .vsync vsync .initialIndex (int index)))
+
+(defn tab-index [^m/TabController c] (.-index c))
+
+(defn animate-tab! [^m/TabController c i] (.animateTo c (int i)) nil)
+
+(defn tab-bar [controller labels on-tap]
+  (m/TabBar .controller controller
+            .isScrollable true
+            .onTap on-tap
+            .tabs (mapv (fn [l] (m/Tab .text (str l))) labels)))
+
+;; ---------------------------------------------------------------------------
+;; Split view parts (used by cloview.flutter.split-view)
+
+(defn layout-builder
+  "LayoutBuilder; `f` receives [max-width max-height] (nil when unbounded)."
+  [f]
+  (m/LayoutBuilder
+   .builder (fn ^m/Widget [_ctx ^m/BoxConstraints c]
+              (f (when (.-hasBoundedWidth c) (.-maxWidth c))
+                 (when (.-hasBoundedHeight c) (.-maxHeight c))))))
+
+(defn drag-handle
+  "Divider strip that reports drag deltas (logical px along the split axis)."
+  [vertical? on-delta]
+  (m/MouseRegion
+   .cursor (if vertical? m/SystemMouseCursors.resizeRow m/SystemMouseCursors.resizeColumn)
+   .child (m/GestureDetector
+           .behavior m/HitTestBehavior.opaque
+           .onHorizontalDragUpdate (when-not vertical?
+                                     (fn [^m/DragUpdateDetails d] (on-delta (.-dx (.-delta d))) nil))
+           .onVerticalDragUpdate (when vertical?
+                                   (fn [^m/DragUpdateDetails d] (on-delta (.-dy (.-delta d))) nil))
+           .child (m/SizedBox
+                   .width (if vertical? nil 6.0)
+                   .height (if vertical? 6.0 nil)
+                   .child (m/ColoredBox .color (m/Color 0x33000000))))))
+
+;; ---------------------------------------------------------------------------
+;; Modal parts (used by cloview.flutter.modal)
+
+(defn ^m/OverlayPortalController overlay-portal-controller [] (m/OverlayPortalController))
+
+(defn portal-showing? [^m/OverlayPortalController c] (.-isShowing c))
+
+(defn portal-show! [^m/OverlayPortalController c] (.show c) nil)
+
+(defn portal-hide! [^m/OverlayPortalController c] (.hide c) nil)
+
+(defn overlay-portal [controller overlay-builder child]
+  (m/OverlayPortal
+   .controller controller
+   .overlayChildBuilder (fn ^m/Widget [_ctx] (overlay-builder))
+   .child child))
+
+(defn dialog-surface
+  "Barrier + centered card. `on-barrier` is called when the barrier is tapped."
+  [title content on-barrier]
+  (m/Stack
+   .children
+   [(m/Positioned.fill
+     .child (m/GestureDetector
+             .behavior m/HitTestBehavior.opaque
+             .onTap (fn [] (on-barrier) nil)
+             .child (m/ColoredBox .color (m/Color 0x8A000000))))
+    (m/Center
+     .child (m/Material
+             .elevation 8.0
+             .borderRadius (m/BorderRadius.circular 8.0)
+             .child (m/Padding
+                     .padding (m/EdgeInsets.all 16.0)
+                     .child (m/Column
+                             .mainAxisSize m/MainAxisSize.min
+                             .crossAxisAlignment m/CrossAxisAlignment.start
+                             .spacing 12.0
+                             .children (if (some? title)
+                                         [(m/Text (str title)
+                                                  .style (m/TextStyle .fontSize 18.0
+                                                                      .fontWeight m/FontWeight.w600))
+                                          content]
+                                         [content])))))]))
+
+;; ---------------------------------------------------------------------------
+;; App shell
+
+(defn material-app [title home]
+  (m/MaterialApp
+   .title (str title)
+   .debugShowCheckedModeBanner false
+   .home (m/Scaffold .body (m/SafeArea .child home))))
+
+(defn snack!
+  "Show a short message (diagnostics)."
+  [ctx msg]
+  (.showSnackBar (m/ScaffoldMessenger.of ctx) (m/SnackBar .content (m/Text (str msg))))
+  nil)

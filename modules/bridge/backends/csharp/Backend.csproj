@@ -1,0 +1,16 @@
+<!--
+  Reference backend for the cloview bridge (protocol "cloview-bridge/1"), C# on .NET 8+.
+  No NuGet packages: System.Text.Json is part of .NET. Build and run commands are in
+  Program.cs (an XML comment cannot contain the double dash of their options).
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RollForward>Major</RollForward>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>backend</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+</Project>

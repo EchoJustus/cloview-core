@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    CloViewHost: [STAThread] WPF host for cloview's ClojureCLR backend.
+
+    Target framework selection (no edits needed):
+      * default: derived from the .NET SDK running the build —
+          SDK 10+ -> net10.0-windows, SDK 9 -> net9.0-windows, otherwise net8.0-windows
+      * override: dotnet build -p:CloViewTargetFramework=net8.0-windows
+        (verify/run-windows-checks.ps1 and `bb wpf:build` pass the highest of net10/9/8
+        that the newest SDK can build and an installed Microsoft.WindowsDesktop.App
+        runtime can run - see docs/STAGE_2_1_DESIGN.md section 1.4)
+    RollForward=Major lets a net8/net9/net10 build run on a machine that only has a
+    newer runtime (e.g. a net10 build on the .NET 11 runtime).
+
+    Clojure sources are NOT compiled in: Program.cs points CLOJURE_LOAD_PATH at the staged
+    tree (default <repo>/target/clr-src). When that tree exists at build time it is also
+    copied to <output>/clr-src so the exe can run stand-alone.
+  -->
+
+  <PropertyGroup>
+    <_CloViewSdkMajor>$(NETCoreSdkVersion.Substring(0, $(NETCoreSdkVersion.IndexOf('.'))))</_CloViewSdkMajor>
+    <CloViewTargetFramework Condition="'$(CloViewTargetFramework)' == '' and $(_CloViewSdkMajor) &gt;= 10">net10.0-windows</CloViewTargetFramework>
+    <CloViewTargetFramework Condition="'$(CloViewTargetFramework)' == '' and $(_CloViewSdkMajor) == 9">net9.0-windows</CloViewTargetFramework>
+    <CloViewTargetFramework Condition="'$(CloViewTargetFramework)' == ''">net8.0-windows</CloViewTargetFramework>
+    <TargetFramework>$(CloViewTargetFramework)</TargetFramework>
+
+    <OutputType>Exe</OutputType>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>CloViewHost</AssemblyName>
+    <RootNamespace>CloView.Host</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RollForward>Major</RollForward>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- lets CI compile-check the host on Linux/macOS (it only runs on Windows) -->
+    <EnableWindowsTargeting Condition="'$(OS)' != 'Windows_NT'">true</EnableWindowsTargeting>
+
+    <ClojureClrVersion Condition="'$(ClojureClrVersion)' == ''">1.12.6</ClojureClrVersion>
+    <CloViewSrcDir Condition="'$(CloViewSrcDir)' == ''">$(MSBuildThisFileDirectory)..\..\..\target\clr-src</CloViewSrcDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Clojure" Version="$(ClojureClrVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('$(CloViewSrcDir)')">
+    <None Include="$(CloViewSrcDir)\**\*.cljr;$(CloViewSrcDir)\**\*.cljc;$(CloViewSrcDir)\**\*.clj"
+          LinkBase="clr-src"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

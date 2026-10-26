@@ -1,0 +1,7 @@
+;; cloview effect runners (.cljc with :cljd / :clj / :cljr branches).
+;; On ClojureDart the app adds the Dart packages of the :cljd branches:
+;;   flutter pub add http shared_preferences path_provider
+{:paths ["src"]
+ :deps {cloview/core {:local/root "../core"}}
+ :aliases {:test {:extra-paths ["test" "../../verify/src"]
+                  :main-opts ["-m" "cloview.verify.test-runner" "fx"]}}}

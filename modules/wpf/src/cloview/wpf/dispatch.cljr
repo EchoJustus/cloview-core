@@ -1,0 +1,62 @@
+;; SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
+(ns cloview.wpf.dispatch
+  "WPF Dispatcher integration for the cloview store and renderer.
+
+  - `executor`: store executor bound to a Dispatcher. dispatch! from a background
+    thread (HTTP callback, timer) is posted with BeginInvoke(Normal); on the UI thread it
+    runs synchronously.
+  - `coalescer`: turns any number of db changes into at most ONE pending render
+    operation per dispatcher turn (BeginInvoke at Normal priority: it runs right after
+    the current input event, before layout and paint).
+  - `pump!`: process pending dispatcher work synchronously (DoEvents) — used by the
+    headless smoke test; apps never need it."
+  (:import [System.Windows.Threading Dispatcher DispatcherFrame DispatcherPriority
+            DispatcherOperationCallback]))
+
+(defn current-dispatcher ^Dispatcher []
+  (Dispatcher/CurrentDispatcher))
+
+(defn post!
+  "Run (f) later on the dispatcher thread."
+  [^Dispatcher d f]
+  (.BeginInvoke d DispatcherPriority/Normal ^System.Delegate (gen-delegate System.Action [] (f)))
+  nil)
+
+(defn on-ui!
+  "Run (f) on the dispatcher thread: immediately when already there, else posted."
+  [^Dispatcher d f]
+  (if (.CheckAccess d) (f) (post! d f)))
+
+(defn executor
+  "cloview.core.store executor for `d`."
+  [^Dispatcher d]
+  {:ui-thread? (fn [] (.CheckAccess d))
+   :post! (fn [f] (post! d f))})
+
+(defn coalescer
+  "Returns (fn []) scheduling at most one pending (render!) on `d`.
+
+  Test-and-set with swap-vals!, not (compare-and-set! pending false true): ClojureCLR
+  1.12.x compares boxed booleans by reference in compare-and-set!, so that CAS never
+  succeeds and no render would ever be scheduled."
+  [^Dispatcher d render!]
+  (let [pending (atom false)]
+    (fn []
+      (let [[was _] (swap-vals! pending (fn [_] true))]
+        (when-not was
+          (post! d (fn []
+                     (reset! pending false)
+                     (render!))))))))
+
+(defn pump!
+  "Synchronously process the dispatcher queue down to Background priority (DoEvents)."
+  []
+  (let [frame (DispatcherFrame.)]
+    (.BeginInvoke (Dispatcher/CurrentDispatcher)
+                  DispatcherPriority/Background
+                  ^System.Delegate (gen-delegate DispatcherOperationCallback [_arg]
+                                     (.set_Continue frame false)
+                                     nil)
+                  nil)
+    (Dispatcher/PushFrame frame)
+    nil))

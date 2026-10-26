@@ -1,0 +1,16 @@
+(ns cloview-app.flutter.main
+  "Cloview App on Flutter (ClojureDart).  bb dev (when flutter is the primary target) or
+  bb run:flutter."
+  (:require ["package:flutter/material.dart" :as m]
+            [cloview.core.store :as st]
+            [cloview.flutter.app :as app]
+            [cloview.flutter.effects :as effects]
+            [cloview-app.core :as core]))
+
+(defn main []
+  ;; plugins (shared_preferences, path_provider) need the binding before runApp
+  (m/WidgetsFlutterBinding.ensureInitialized)
+  (core/register!)
+  (effects/install! {:app-id "cloview-app"})
+  (st/dispatch! core/store [:notes/load])
+  (app/start! {:store core/store :view core/root :title "Cloview App"}))

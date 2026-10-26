@@ -1,0 +1,103 @@
+;; SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
+(ns greeter.flutter.greeter-test
+  "Flutter widget tests (verify step 06): the Greeter spike end to end, and the kitchen
+  sink (every V1 tag) mounted and patched.
+
+    clj -M:test:cljd test"
+  (:require ["package:flutter/material.dart" :as m]
+            ["package:flutter_test/flutter_test.dart" :as ft]
+            [cljd.test :refer [deftest]]
+            [cloview.core.store :as st]
+            [cloview.flutter.app :as app]
+            [cloview.flutter.material :as mat]
+            [greeter.core :as g]
+            [greeter.kitchen-sink :as ks]))
+
+(defn- by-test-id
+  "Finder for a node's :test-id. The key is built by mat/value-key, like the adapters
+  build it, so both ValueKeys have the same runtime type (ValueKey == compares it)."
+  [id]
+  (ft/find.byKey (mat/value-key (str "test-id:" id))))
+
+(deftest greeter-flow
+  :runner (ft/testWidgets [tester])
+  (g/register!)
+  (let [^ft/WidgetTester tester tester
+        store (st/create-store {:db g/initial-db})]
+    (await (.pumpWidget tester (app/app-widget {:store store :view g/root :title "test"})))
+    (ft/expect (ft/find.text "Greeter") ft/findsOneWidget)
+    ;; user typing: onChanged -> dispatch -> db (synchronously)
+    (await (.enterText tester (ft/find.byType m/TextField) "Ada"))
+    (await (.pump tester))
+    (ft/expect (:name (st/db store)) (ft/equals "Ada"))
+    (let [^m/TextField tf (.widget tester (ft/find.byType m/TextField))
+          ^m/TextEditingController ctrl (.-controller tf)
+          caret-before (.-baseOffset (.-selection (.-value ctrl)))]
+      (ft/expect (.-text ctrl) (ft/equals "Ada"))
+      ;; external value change: written post-frame, caret preserved (clamped)
+      (st/dispatch! store [:app/set-name "Ada Lovelace"])
+      (await (.pump tester))
+      (await (.pump tester))
+      (ft/expect (.-text ctrl) (ft/equals "Ada Lovelace"))
+      (ft/expect (.-baseOffset (.-selection (.-value ctrl))) (ft/equals caret-before))
+      ;; the controller survived every rebuild (managed with :refresh-on nil)
+      (ft/expect (identical? ctrl (.-controller ^m/TextField (.widget tester (ft/find.byType m/TextField))))
+                 ft/isTrue)
+      (await (.tap tester (ft/find.text "Greet")))
+      (await (.pump tester))
+      (ft/expect (ft/find.text "Hello, Ada Lovelace!") ft/findsOneWidget))))
+
+(def native-host
+  {:build (fn [_ctx props] (m/Text (str "native " (:n props))))})
+
+(deftest kitchen-sink
+  :runner (ft/testWidgets [tester])
+  (ks/register!)
+  (let [^ft/WidgetTester tester tester
+        store (st/create-store {:db ks/initial-db})
+        view (.-view tester)
+        item-a (volatile! nil)]
+    (.-physicalSize! view (m/Size 1400.0 2400.0))
+    (.-devicePixelRatio! view 1.0)
+    (await (.pumpWidget tester (app/app-widget {:store store
+                                                 :view (fn [db] (ks/view db native-host))
+                                                 :title "kitchen sink"})))
+    (doseq [id ["ks-root" "ks-row" "ks-grid" "ks-wrap" "ks-toggle" "ks-scroll" "ks-box" "ks-align"
+                "ks-spacer" "ks-text" "ks-button" "ks-input" "ks-checkbox" "ks-switch" "ks-select"
+                "ks-image" "ks-split" "ks-tabs" "ks-modal"]]
+      (ft/expect (by-test-id id) ft/findsOneWidget))
+    (ft/expect (ft/find.text "native 0") ft/findsOneWidget)
+    (vreset! item-a (.element tester (ft/find.text "item a")))
+    ;; patches up to opening the modal
+    (st/dispatch! store [:ks/text "typed"])
+    (st/dispatch! store [:ks/check true])
+    (st/dispatch! store [:ks/switch false])
+    (st/dispatch! store [:ks/select :a])
+    (st/dispatch! store [:ks/ratio 0.6])
+    (st/dispatch! store [:ks/tab :two])
+    (st/dispatch! store [:ks/open-modal])
+    (await (.pump tester))
+    (await (.pumpAndSettle tester))
+    (ft/expect (ft/find.text "modal body") ft/findsOneWidget)
+    (ft/expect (ft/find.text "second tab") ft/findsOneWidget)
+    ;; remaining patches
+    (st/dispatch! store [:ks/bump])
+    (st/dispatch! store [:ks/rotate])
+    (st/dispatch! store [:ks/close-modal])
+    (st/dispatch! store [:ks/chip :x false])
+    (st/dispatch! store [:ks/chip :y true])
+    (await (.pump tester))
+    (await (.pumpAndSettle tester))
+    (let [chip (fn [id] (.widget tester (ft/find.descendant .of (by-test-id id)
+                                                            .matching (ft/find.byType m/FilterChip))))]
+      (ft/expect (.-selected ^m/FilterChip (chip "ks-toggle")) (ft/equals false))
+      (ft/expect (.-selected ^m/FilterChip (chip "ks-toggle-y")) (ft/equals true)))
+    (ft/expect (ft/find.text "modal body") ft/findsNothing)
+    (ft/expect (ft/find.text "native 1") ft/findsOneWidget)
+    ;; keyed reorder ([:ks/rotate]): the "item a" element moved with its ValueKey
+    (ft/expect (identical? @item-a (.element tester (ft/find.text "item a"))) ft/isTrue)
+    (let [^m/TextField tf (.widget tester (ft/find.descendant .of (by-test-id "ks-input")
+                                                             .matching (ft/find.byType m/TextField)))]
+      (ft/expect (.-text ^m/TextEditingController (.-controller tf)) (ft/equals "typed")))
+    (.resetPhysicalSize view)
+    (.resetDevicePixelRatio view)))

@@ -1,0 +1,25 @@
+;; Greeter on Flutter (ClojureDart).
+;;
+;; The verification harness and `bb run:flutter` copy this directory to
+;; target/flutter-greeter (rewriting the :local/root paths to absolute ones), run
+;; `clj -M:cljd init` there (flutter create) and keep the example folder clean.
+;; Manual use in place also works:
+;;   clj -M:cljd init            ; once (creates pubspec.yaml, lib/, platform folders)
+;;   clj -M:cljd flutter -d windows
+;;   clj -M:test:cljd test       ; widget tests
+;;   clj -M:cljd-diag compile    ; on a compile error: also print the full cause chain
+;; Requires Flutter >= 3.35 (3.47.x recommended) and, for the effect runners,
+;;   flutter pub add http shared_preferences path_provider
+{:paths ["src"]
+ :deps {tensegritics/clojuredart {:git/url "https://github.com/tensegritics/ClojureDart.git"
+                                  :git/tag "0.9.20261002"
+                                  :git/sha "247b3c2c5f2af8378e49a8f1271fb4e45e4a6982"}
+        cloview/flutter {:local/root "../../../modules/flutter"}
+        greeter/shared {:local/root "../shared"}}
+ :aliases {:cljd {:main-opts ["-m" "cljd.build"]}
+           ;; same as :cljd, plus the full cause chain of a compile error
+           :cljd-diag {:extra-deps {cloview/cljd-diag {:local/root "../../../verify/cljd"}}
+                       :main-opts ["-m" "cloview.verify.cljd-diag"]}
+           :test {:extra-paths ["test"]}}
+ :cljd/opts {:kind :flutter
+             :main greeter.flutter.main}}

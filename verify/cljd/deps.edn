@@ -1,0 +1,3 @@
+;; cljd-diag: `clj -M:cljd-diag <command>` = `clj -M:cljd <command>` + the full cause chain
+;; of a ClojureDart compilation error (see src/cloview/verify/cljd_diag.clj).
+{:paths ["src"]}

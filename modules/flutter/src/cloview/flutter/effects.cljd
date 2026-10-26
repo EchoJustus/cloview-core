@@ -1,0 +1,32 @@
+;; SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
+(ns cloview.flutter.effects
+  "Host effects for Flutter apps. Kept out of cloview.flutter.app on purpose: apps (and
+  the Stage 2-1 verification) can compile the UI layer without the effect namespaces and
+  their Dart packages (http, shared_preferences, path_provider).
+
+    (effects/install! {:app-id \"my-app\"})"
+  (:require [cloview.core.store :as st]
+            [cloview.fx.file :as file]
+            [cloview.fx.http :as http]
+            [cloview.fx.lan-sync :as lan-sync]
+            [cloview.fx.storage :as storage]
+            [cloview.fx.timer :as timer]))
+
+(defn- pick-unsupported [{:keys [on-cancel on-failure]} {:keys [dispatch!]}]
+  ;; :file/pick needs the file_picker plugin (planned for Stage 3, see
+  ;; docs/ROADMAP_AND_EXTENSIONS.md); until then it reports :unsupported (ARCH-003).
+  (cond
+    on-failure (dispatch! (conj on-failure {:error :unsupported :effect :file/pick}))
+    on-cancel (dispatch! on-cancel)))
+
+(defn install!
+  "Install every host effect for Flutter."
+  ([] (install! {}))
+  ([{:keys [app-id] :or {app-id "cloview"}}]
+   (timer/install!)
+   (http/install!)
+   (storage/install! {:app-id app-id})
+   (file/install! {:app-id app-id})
+   (lan-sync/install!)
+   (st/reg-fx :file/pick pick-unsupported)
+   :installed))

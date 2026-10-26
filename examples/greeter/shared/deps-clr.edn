@@ -1,0 +1,2 @@
+{:paths ["src"]
+ :deps {cloview/core {:local/root "../../../modules/core"}}}

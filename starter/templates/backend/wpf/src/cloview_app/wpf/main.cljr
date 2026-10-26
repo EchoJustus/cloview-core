@@ -1,0 +1,97 @@
+(ns cloview-app.wpf.main
+  "Cloview App on WPF (ClojureCLR), with its backend process. CloViewHost (wpf/host)
+  calls these entry points:
+
+    start!               the app (bb dev when wpf is the primary target, or bb run:wpf)
+    run-tests!           --run-tests: the shared tests on the CLR (bb test:clr)
+    run-headless-smoke!  --headless-smoke: mount the view off-screen and check it"
+  (:require [cloview.bridge :as bridge]
+            [cloview.bridge.manifest :as manifest]
+            [cloview.core.reconcile :as r]
+            [cloview.core.store :as st]
+            [cloview.verify.report :as report]
+            [cloview.verify.test-runner :as test-runner]
+            [cloview.wpf.app :as app]
+            [cloview.wpf.dispatch :as dispatch]
+            [cloview-app.core :as core]))
+
+(import '[System.Windows Window]
+        '[System.Windows.Controls TextBox TextBlock])
+
+(defn app-dir
+  "appDir, the folder that holds backend/: CLOVIEW_APP_DIR when set; else the folder of
+  the executable when backend/ is next to it (a packaged app); else the working
+  directory (bb dev and bb run:wpf start the host from the project folder) or its
+  parent (started from wpf/); else the nearest folder above the executable that holds
+  backend/ (the host started from target/clr-host by hand)."
+  []
+  (let [has-backend? (fn [d] (and d (System.IO.File/Exists (System.IO.Path/Combine (str d) "backend" "backend-manifest.json"))))
+        parent (fn [d] (when d
+                         (let [p (System.IO.Path/GetFullPath (System.IO.Path/Combine (str d) ".."))]
+                           (when-not (= p (System.IO.Path/GetFullPath (str d))) p))))
+        env (System.Environment/GetEnvironmentVariable "CLOVIEW_APP_DIR")
+        base System.AppContext/BaseDirectory
+        cwd System.Environment/CurrentDirectory]
+    (System.IO.Path/GetFullPath
+     (str (cond
+            (seq env) env
+            (has-backend? base) base
+            (has-backend? cwd) cwd
+            (has-backend? (parent cwd)) (parent cwd)
+            :else (or (first (filter has-backend? (take 5 (iterate parent (parent base))))) cwd))))))
+
+(defn start!
+  "Called by CloViewHost before Application.Run()."
+  [_application]
+  (core/register!)
+  (let [app-dir (app-dir)]
+    (app/start! {:store core/store
+                 :view core/root
+                 :title "Cloview App"
+                 :width 480
+                 :height 300
+                 :app-id "cloview-app"})
+    (bridge/install! {:manifests [(manifest/parse (System.IO.File/ReadAllText
+                                                   (System.IO.Path/Combine app-dir "backend" "backend-manifest.json")))]
+                      :vars {:appDir app-dir
+                             :dataDir (System.IO.Path/Combine
+                                       (System.Environment/GetFolderPath System.Environment+SpecialFolder/LocalApplicationData)
+                                       "cloview-app")
+                             :tempDir (System.IO.Path/GetTempPath)}
+                      :dispatch! (fn [ev] (st/dispatch! core/store ev))
+                      :on-status [:app/backend-status]
+                      :on-log (fn [id {:keys [level message]}] (println (str "[" (name id) " " level "] " message)))
+                      :app-info {:name "cloview-app"}})))
+
+(defn run-tests!
+  "The shared tests on ClojureCLR; returns the exit code."
+  [out-path]
+  (test-runner/run-namespaces! '[cloview-app.core-test] out-path))
+
+(defn run-headless-smoke!
+  "Mount the view off-screen, type into it, check the result. Writes JSON to `out-path`;
+  returns 0 when every check passed. (The backend is not started.)"
+  [out-path]
+  (core/register!)
+  (let [started (report/now-ms)
+        rep (report/new-report "app-wpf-smoke" "clr/wpf")
+        store (st/create-store {:db core/initial-db})]
+    (try
+      (let [{:keys [window rctx unmount!]} (app/mount! {:store store :view core/root :title "smoke"
+                                                        :width 480 :height 300 :offscreen? true})]
+        (.Show ^Window window)
+        (dispatch/pump!)
+        (report/check! rep "title" "Cloview App" (some-> ^TextBlock (r/handle-by-test-id rctx "title") .Text))
+        (report/check! rep "backend-status" "backend: idle" (some-> ^TextBlock (r/handle-by-test-id rctx "backend") .Text))
+        (st/dispatch! store [:text/input "hello"])
+        (dispatch/pump!)
+        (report/check! rep "input-shown" "hello" (some-> ^TextBox (r/handle-by-test-id rctx "input") .Text))
+        (unmount!)
+        (.Close ^Window window))
+      (catch System.Exception e
+        (report/error! rep "smoke" e)))
+    (let [final (report/finish rep started (report/now-ms))]
+      (report/write-json! out-path final)
+      (println (str "app wpf smoke: " (if (:ok final) "OK" "FAILED")
+                    " (" (:checks_passed final) "/" (:checks_total final) " checks) -> " out-path))
+      (if (:ok final) 0 1))))

@@ -1,0 +1,14 @@
+;; cloview Flutter adapter (ClojureDart). Consumed by a ClojureDart app's deps.edn,
+;; which also brings tensegritics/clojuredart (see examples/greeter/flutter/deps.edn).
+;;
+;; Requirements: Flutter >= 3.35 (ClojureDart 0.9.20261002's cljd.flutter needs it;
+;; Row/Column spacing needs >= 3.27); 3.47.x recommended.
+;; Dart packages: none for the UI layer. Apps that install the effect runners
+;; (cloview.flutter.effects) add the packages used by cloview.fx.* themselves:
+;;   flutter pub add http shared_preferences path_provider
+;; (No pubspec.yaml "bridge" here: ClojureDart adds bridges with
+;; `flutter pub add name:{"path":...}`, whose JSON quoting does not survive flutter.bat
+;; on Windows — see docs/WINDOWS_VERIFICATION_REPORT.md.)
+{:paths ["src"]
+ :deps {cloview/core {:local/root "../core"}
+        cloview/fx {:local/root "../fx"}}}

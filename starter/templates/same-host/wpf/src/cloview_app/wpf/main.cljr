@@ -1,0 +1,61 @@
+(ns cloview-app.wpf.main
+  "Cloview App on WPF (ClojureCLR). CloViewHost (wpf/host) calls these entry points:
+
+    start!               the app (bb dev when wpf is the primary target, or bb run:wpf)
+    run-tests!           --run-tests: the shared tests on the CLR (bb test:clr)
+    run-headless-smoke!  --headless-smoke: mount the view off-screen and check it"
+  (:require [cloview.core.reconcile :as r]
+            [cloview.core.store :as st]
+            [cloview.verify.report :as report]
+            [cloview.verify.test-runner :as test-runner]
+            [cloview.wpf.app :as app]
+            [cloview.wpf.dispatch :as dispatch]
+            [cloview-app.core :as core]))
+
+(import '[System.Windows Window]
+        '[System.Windows.Controls TextBox TextBlock])
+
+(defn start!
+  "Called by CloViewHost before Application.Run()."
+  [_application]
+  (core/register!)
+  (app/start! {:store core/store
+               :view core/root
+               :title "Cloview App"
+               :width 480
+               :height 420
+               :app-id "cloview-app"})           ; storage file name
+  (st/dispatch! core/store [:notes/load]))
+
+(defn run-tests!
+  "The shared tests on ClojureCLR; returns the exit code."
+  [out-path]
+  (test-runner/run-namespaces! '[cloview-app.core-test] out-path))
+
+(defn run-headless-smoke!
+  "Mount the view off-screen, type into it, check the result. Writes JSON to `out-path`;
+  returns 0 when every check passed."
+  [out-path]
+  (core/register!)
+  (let [started (report/now-ms)
+        rep (report/new-report "app-wpf-smoke" "clr/wpf")
+        store (st/create-store {:db (assoc core/initial-db :loaded? true)})]
+    (try
+      (let [{:keys [window rctx unmount!]} (app/mount! {:store store :view core/root :title "smoke"
+                                                        :width 480 :height 420 :offscreen? true})]
+        (.Show ^Window window)
+        (dispatch/pump!)
+        (report/check! rep "title" "Cloview App" (some-> ^TextBlock (r/handle-by-test-id rctx "title") .Text))
+        (report/check! rep "empty-state" "No notes yet." (some-> ^TextBlock (r/handle-by-test-id rctx "empty") .Text))
+        (st/dispatch! store [:notes/draft "hello"])
+        (dispatch/pump!)
+        (report/check! rep "draft-shown" "hello" (some-> ^TextBox (r/handle-by-test-id rctx "draft") .Text))
+        (unmount!)
+        (.Close ^Window window))
+      (catch System.Exception e
+        (report/error! rep "smoke" e)))
+    (let [final (report/finish rep started (report/now-ms))]
+      (report/write-json! out-path final)
+      (println (str "app wpf smoke: " (if (:ok final) "OK" "FAILED")
+                    " (" (:checks_passed final) "/" (:checks_total final) " checks) -> " out-path))
+      (if (:ok final) 0 1))))

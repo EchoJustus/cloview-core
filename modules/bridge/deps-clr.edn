@@ -1,0 +1,5 @@
+;; cloview bridge for ClojureCLR (cljr resolves git/local deps only). CloViewHost loads the
+;; staged sources (target/clr-src) itself; this file serves `cljr -Spath` and editors.
+{:paths ["src"]
+ :deps {cloview/core {:local/root "../core"}
+        cloview/fx {:local/root "../fx"}}}

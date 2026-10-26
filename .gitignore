@@ -1,0 +1,96 @@
+# ---------------------------------------------------------------------------
+# Build output and staged sources
+#   target/  bb wpf:sync, the Windows harness, target/flutter-* generated Flutter projects
+target/
+build/
+
+# Verification results (local paths inside; upload the zip, never commit it)
+verify/out/*
+!verify/out/.gitkeep
+verify/cloview-windows-verification-results.zip
+
+# Licence signing keys (cloview.licensing.issue keygen): secrets, never commit
+*.private.edn
+license-keys/
+
+# Compiled binaries anywhere
+*.dll
+*.exe
+*.pdb
+*.snapshot
+*.nupkg
+*.class
+*.jar
+
+# ---------------------------------------------------------------------------
+# JVM / Clojure CLI / tooling
+.cpcache/
+.lsp/.cache/
+.clj-kondo/.cache/
+.portal/
+.calva/output-window/
+.nrepl-port
+.rebel_readline_history
+.shadow-cljs/
+
+# ---------------------------------------------------------------------------
+# ClojureDart / Flutter / Dart (also when an example is initialized in place)
+.clojuredart/
+.dart_tool/
+**/lib/cljd-out/
+**/test/cljd-out/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+.gradle/
+local.properties
+# scaffolding that `clj -M:cljd init` (flutter create) adds inside examples/*/flutter
+examples/*/flutter/android/
+examples/*/flutter/ios/
+examples/*/flutter/linux/
+examples/*/flutter/macos/
+examples/*/flutter/windows/
+examples/*/flutter/web/
+examples/*/flutter/lib/
+examples/*/flutter/pubspec.yaml
+examples/*/flutter/pubspec.lock
+examples/*/flutter/analysis_options.yaml
+examples/*/flutter/.metadata
+examples/*/flutter/test/widget_test.dart
+
+# ---------------------------------------------------------------------------
+# .NET / Visual Studio
+bin/
+obj/
+# ...but Dart keeps executables in bin/ by convention
+!modules/bridge/backends/dart/bin/
+.vs/
+*.user
+*.suo
+TestResults/
+
+# ---------------------------------------------------------------------------
+# Python (ops tools)
+__pycache__/
+*.pyc
+
+# ---------------------------------------------------------------------------
+# Editors and OS temp files
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+*.tmp
+.DS_Store
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ops job results: zips are transport only; result folders go on ops-results/* branches
+ops/results/*.zip

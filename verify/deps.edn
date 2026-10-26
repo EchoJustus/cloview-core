@@ -1,0 +1,2 @@
+;; Verification helpers (portable test runner + JSON report writer) as a local dep.
+{:paths ["src"]}

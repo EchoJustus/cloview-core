@@ -1,0 +1,19 @@
+(ns cloview-app.flutter.app-test
+  "A Flutter widget test of the app (bb test:flutter, together with the shared tests)."
+  (:require ["package:flutter_test/flutter_test.dart" :as ft]
+            [cljd.test :refer [deftest]]
+            [cloview.core.store :as st]
+            [cloview.flutter.app :as app]
+            [cloview-app.core :as core]))
+
+(deftest renders-and-reacts
+  :runner (ft/testWidgets [tester])
+  (core/register!)
+  (let [^ft/WidgetTester tester tester
+        store (st/create-store {:db (assoc core/initial-db :loaded? true)})]
+    (await (.pumpWidget tester (app/app-widget {:store store :view core/root :title "test"})))
+    (ft/expect (ft/find.text "Cloview App") ft/findsOneWidget)
+    (ft/expect (ft/find.text "No notes yet.") ft/findsOneWidget)
+    (st/dispatch! store [:notes/draft "hello"])
+    (await (.pump tester))
+    (ft/expect (:draft (st/db store)) (ft/equals "hello"))))

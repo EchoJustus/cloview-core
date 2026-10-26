@@ -1,0 +1,12 @@
+;; SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
+(ns greeter.flutter.main
+  "Greeter on Flutter (ClojureDart).  Run: bb run:flutter
+  (prepares target/flutter-greeter, then `clj -M:cljd flutter -d <device>`)."
+  (:require [cloview.flutter.app :as app]
+            [greeter.core :as g]))
+
+(defn main []
+  (g/register!)
+  (app/start! {:store g/store
+               :view g/root
+               :title "cloview greeter — Flutter"}))

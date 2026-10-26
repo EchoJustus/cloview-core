@@ -1,0 +1,6 @@
+name: cloview_bridge_reference_backend
+description: Reference backend for the cloview bridge (protocol cloview-bridge/1).
+publish_to: none
+version: 1.0.0
+environment:
+  sdk: ">=3.0.0 <4.0.0"

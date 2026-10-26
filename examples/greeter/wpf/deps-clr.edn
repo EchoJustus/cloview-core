@@ -1,0 +1,9 @@
+;; Greeter on WPF (ClojureCLR). The runnable app is CloViewHost.exe
+;; (modules/wpf/host-template), which loads the staged sources:
+;;   bb run:wpf            ; stage + build + run
+;;   bb smoke:wpf          ; off-screen smoke -> verify/out/clr-wpf-smoke.json
+;; This file lets `cljr -Spath` / editors resolve the same source set.
+{:paths ["src"]
+ :deps {cloview/wpf {:local/root "../../../modules/wpf"}
+        cloview/verify {:local/root "../../../verify"}
+        greeter/shared {:local/root "../shared"}}}

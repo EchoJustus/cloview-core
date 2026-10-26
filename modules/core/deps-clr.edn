@@ -1,0 +1,6 @@
+;; ClojureCLR view of modules/core (cljr reads deps-clr.edn before deps.edn).
+;;   cljr -M:test     ; core tests on ClojureCLR
+{:paths ["src"]
+ :deps {}
+ :aliases {:test {:extra-paths ["test" "../../verify/src"]
+                  :main-opts ["-m" "cloview.verify.test-runner" "core"]}}}

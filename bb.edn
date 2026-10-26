@@ -1,0 +1,88 @@
+;; cloview-core tasks (babashka). Run from the repo root:  bb tasks  — lists them.
+;; The fitness app's tasks (bb fitness:test, bb run:fitness:wpf, ...) are in cloview-examples.
+;; Babashka is optional: verify/run-windows-checks.ps1 needs only PowerShell.
+{:paths ["verify/bb" "starter/src"]
+ :tasks
+ {:requires ([cloview.tasks :as t])
+
+  init
+  {:doc "Create a new app: bb init ../my-app [--target javafx|wpf|flutter] [--logic same-host|backend] (see README)"
+   ;; loaded on demand, so the other tasks never depend on the generator
+   :task (do (require 'cloview.starter)
+             (apply (resolve 'cloview.starter/-main) *command-line-args*))}
+
+  test
+  {:doc "JVM unit tests: core, fx, bridge, licensing (+ key tool), initializer, cljfx description snapshots (no display needed)"
+   :task (apply clojure "-M:test" *command-line-args*)}
+
+  static-check
+  {:doc "Read every .clj/.cljc/.cljd/.cljr and check cross-namespace calls/arities"
+   :task (clojure "-M:static-check")}
+
+  smoke:javafx
+  {:doc "Off-screen JavaFX smoke (Greeter + kitchen sink) -> verify/out/03-jvm-cljfx-smoke.json"
+   :task (clojure "-M:smoke-javafx" "verify/out/03-jvm-cljfx-smoke.json")}
+
+  run:javafx
+  {:doc "Greeter on JavaFX (interactive)"
+   :task (clojure "-M:run-javafx")}
+
+  wpf:sync
+  {:doc "Stage .clj/.cljc/.cljr sources into target/clr-src (CLOJURE_LOAD_PATH of CloViewHost)"
+   :task (t/wpf-sync!)}
+
+  wpf:build
+  {:doc "Build CloViewHost (net10.0-windows, falling back to net9/net8 per installed SDK/runtime)"
+   :depends [wpf:sync]
+   :task (t/wpf-build!)}
+
+  test:clr
+  {:doc "Portable unit tests (core, fx, bridge, licensing) on ClojureCLR through CloViewHost --run-tests"
+   :depends [wpf:build]
+   :task (t/wpf-run! "--run-tests" "--out" "verify/out/04-clr-unit-tests.json")}
+
+  smoke:wpf
+  {:doc "Off-screen WPF smoke -> verify/out/clr-wpf-smoke.json"
+   :depends [wpf:build]
+   :task (t/wpf-run! "--headless-smoke" "--out" "verify/out/clr-wpf-smoke.json")}
+
+  run:wpf
+  {:doc "Greeter on WPF (interactive). Extra args go to CloViewHost (e.g. --repl 5555)"
+   :depends [wpf:build]
+   :task (apply t/wpf-run! *command-line-args*)}
+
+  flutter:check
+  {:doc "Check that Flutter >= 3.35 is on PATH (ClojureDart 0.9.20261002 requirement)"
+   :task (t/check-flutter!)}
+
+  flutter:prepare
+  {:doc "Create target/flutter-greeter (copy, `clj -M:cljd init`, flutter pub add)"
+   :task (t/flutter-prepare! "greeter")}
+
+  test:flutter
+  {:doc "ClojureDart compile + Flutter widget tests (Greeter + kitchen sink)"
+   :depends [flutter:prepare]
+   :task (clojure {:dir "target/flutter-greeter"} "-M:test:cljd" "test")}
+
+  diag:flutter
+  {:doc "Recompile target/flutter-<example> (default greeter) printing the full cause chain of a compile error"
+   :task (let [n (or (first *command-line-args*) "greeter")]
+           (clojure {:dir (str "target/flutter-" n)} "-M:cljd-diag" "compile"))}
+
+  run:flutter
+  {:doc "Greeter on Flutter with hot reload; args go to flutter run (default: -d windows)"
+   :depends [flutter:prepare]
+   :task (apply clojure {:dir "target/flutter-greeter"} "-M:cljd" "flutter"
+                (or (seq *command-line-args*) ["-d" "windows"]))}
+
+  verify
+  {:doc "Windows: the full verification (verify/run-windows-checks.ps1); options pass through, e.g. bb verify -SkipFlutter"
+   :task (apply shell "powershell" "-NoProfile" "-ExecutionPolicy" "Bypass"
+                "-File" "verify/run-windows-checks.ps1" *command-line-args*)}
+
+  clean
+  {:doc "Remove target/ and verify/out/"
+   :task (do (babashka.fs/delete-tree "target")
+             (babashka.fs/delete-tree "verify/out")
+             (babashka.fs/create-dirs "verify/out")
+             (spit "verify/out/.gitkeep" ""))}}}

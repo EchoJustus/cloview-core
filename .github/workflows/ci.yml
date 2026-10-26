@@ -1,0 +1,112 @@
+# CI on GitHub-hosted runners (free for public repositories): the checks that need no
+# Windows desktop. Results: the job summary, and the `*-results` artifacts (verify/out).
+# How Claude Code and people read them: docs/DEVELOPMENT_WORKFLOW.md §2.
+# The fitness app and its benchmark are checked by cloview-examples' own CI.
+name: ci
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**/*.md', 'docs/**']
+  pull_request:
+    paths-ignore: ['**/*.md', 'docs/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: JVM tests, static check, Greeter smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: DeLaGuardo/setup-clojure@13.7
+        with:
+          cli: latest
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+          key: clj-${{ runner.os }}-${{ hashFiles('**/deps.edn') }}
+
+      - name: R and its plotting packages (the real-R bridge test)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            r-base-core r-cran-jsonlite r-cran-ggplot2 r-cran-ragg r-cran-svglite
+
+      - name: Unit tests (core, fx, bridge, licensing, key tool, initializer, cljfx descriptions)
+        run: clojure -M:test --out verify/out/ci-jvm-unit-tests.json
+
+      - name: Static check
+        run: clojure -M:static-check
+
+      # The Greeter + kitchen sink, off-screen on JavaFX (Xvfb, software rendering): the
+      # built-in smoke test. Experimental until its first green run on a hosted runner.
+      - name: JavaFX smoke of the Greeter (Xvfb)
+        continue-on-error: true
+        run: xvfb-run -a clojure -J-Dprism.order=sw -M:smoke-javafx verify/out/ci-jvm-cljfx-smoke.json
+
+      - name: ops tools (result recorder, CI summary)
+        run: python3 -I -B -m unittest discover -s ops/tools -p "test_*.py"
+
+      - name: Summary
+        if: always()
+        run: python3 -I ops/tools/ci_summary.py verify/out >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: linux-results
+          path: verify/out/
+          retention-days: 14
+
+  clr:
+    # Experimental until its first green run: the portable suites on ClojureCLR through the
+    # Clojure.Main tool (the Windows harness runs them inside the real WPF host).
+    name: ClojureCLR portable suites (experimental)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+
+      - name: Install ClojureCLR
+        run: dotnet tool install --global Clojure.Main --version 1.12.6
+
+      - name: Portable suites (core, fx, bridge, licensing)
+        run: |
+          mkdir -p verify/out
+          export CLOJURE_LOAD_PATH="$PWD/modules/core/src:$PWD/modules/core/test:$PWD/modules/fx/src:$PWD/modules/fx/test:$PWD/modules/bridge/src:$PWD/modules/bridge/test:$PWD/modules/licensing/src:$PWD/modules/licensing/test:$PWD/verify/src"
+          Clojure.Main -m cloview.verify.test-runner core fx bridge licensing --out verify/out/ci-clr-unit-tests.json
+
+      - name: Summary
+        if: always()
+        run: python3 -I ops/tools/ci_summary.py verify/out >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: clr-results
+          path: verify/out/
+          retention-days: 14

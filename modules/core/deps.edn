@@ -1,0 +1,6 @@
+;; cloview core — pure .cljc (tree, store, style, color, reconcile). No dependencies:
+;; the consuming app brings its Clojure (JVM), ClojureDart or ClojureCLR runtime.
+{:paths ["src"]
+ :deps {}
+ :aliases {:test {:extra-paths ["test" "../../verify/src"]
+                  :main-opts ["-m" "cloview.verify.test-runner" "core"]}}}

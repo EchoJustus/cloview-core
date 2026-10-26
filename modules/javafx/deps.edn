@@ -1,0 +1,15 @@
+;; cloview JVM backend: canonical tree -> cljfx descriptions (JavaFX).
+;;
+;; cljfx's published pom selects JavaFX by JDK (22-ea+16 on JDK 17+), so no JavaFX
+;; coordinates are needed here. If the Clojars coordinate cannot be resolved, use the
+;; :cljfx-git alias (same release, from GitHub).
+{:paths ["src"]
+ :deps {cloview/core {:local/root "../core"}
+        cloview/fx {:local/root "../fx"}
+        cljfx/cljfx {:mvn/version "1.10.363"}}
+ :aliases {:test {:extra-paths ["test" "../../verify/src"]
+                  :main-opts ["-m" "cloview.verify.test-runner" "javafx"]}
+           :cljfx-git {:override-deps
+                       {cljfx/cljfx {:git/url "https://github.com/cljfx/cljfx"
+                                     :git/tag "1.10.363"
+                                     :git/sha "6bee510722fbb12d4f7ac447d413a77894bd7e33"}}}}}

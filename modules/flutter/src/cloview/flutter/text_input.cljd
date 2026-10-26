@@ -1,0 +1,52 @@
+;; SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
+(ns cloview.flutter.text-input
+  "Controlled :ui/text-input for Flutter.
+
+  The TextEditingController is a :managed resource created ONCE per element
+  (`:refresh-on nil`: the creation expression closes over the initial value, which
+  would otherwise make cljd.flutter dispose/recreate the controller on every value
+  change and lose caret + IME state).
+
+  External value synchronization (docs/STAGE_2_1_DESIGN.md §3):
+  - user typing: onChanged dispatches synchronously, the db now equals the controller
+    text, the rebuild sees value == controller text and writes nothing — caret, selection
+    and the IME composing range are untouched;
+  - external change (value != controller text at build time): the write is deferred
+    with addPostFrameCallback, so no listener fires setState during build, and is
+    skipped if the user edited the field in the meantime (their newer text already went
+    to the db). The written TextEditingValue keeps the caret/selection clamped to the
+    new length and keeps the composing range only if it still covers unchanged text."
+  (:require [cljd.flutter :as f]
+            [cloview.core.tree :as t]
+            [cloview.flutter.material :as mat]
+            [cloview.flutter.style :as style]))
+
+(defn- schedule-sync!
+  "After the frame, write `value` unless the controller changed since `seen-text`."
+  [ctrl seen-text value]
+  (mat/post-frame!
+   (fn []
+     (when (= (mat/controller-text ctrl) seen-text)
+       (mat/set-controller-value! ctrl (mat/external-editing-value (mat/controller-value ctrl) value))))))
+
+(defn text-input-widget
+  "Widget for a normalized :ui/text-input node's props; `dispatch!` takes event vectors."
+  [props dispatch!]
+  (let [{:keys [value placeholder on-change on-submit password? disabled?]} props
+        nstyle (style/normalize props)]
+    (f/widget
+     :managed [ctrl (mat/text-editing-controller (or value "")) :refresh-on nil]
+     :let [seen (mat/controller-text ctrl)
+           _ (when (and (some? value) (not= value seen))
+               (schedule-sync! ctrl seen value))]
+     (style/wrap-box
+      nstyle
+      (mat/text-field ctrl
+                      {:placeholder placeholder
+                       :obscure? password?
+                       :enabled? (not disabled?)
+                       :style (style/text-style nstyle)
+                       :on-changed (when on-change
+                                     (fn [s] (t/emit! dispatch! on-change :string s) nil))
+                       :on-submitted (when on-submit
+                                       (fn [s] (t/emit! dispatch! on-submit :string s) nil))})))))

@@ -1,0 +1,295 @@
+;; SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
+(ns cloview.flutter.adapters
+  "Runtime interpreter: canonical node -> Flutter Widget through a static registry of
+  hand-written adapter fns.
+
+  Why a registry and not reflection/EDN-driven constructor calls: Dart has no eval,
+  Flutter AOT builds have no mirrors, and named arguments cannot be built safely from
+  runtime maps — so every widget constructor must appear literally in compiled code
+  (which also keeps tree-shaking sound). Each adapter is a plain fn (node ctx) -> Widget;
+  the whole tree is rebuilt from the canonical view on every db change and Flutter's
+  Element tree reconciles it (runtimeType + key), keeping State objects alive.
+
+  ctx = {:dispatch! (fn [event-vector])}
+
+  Identity: a node's :key becomes a ValueKey on its OUTERMOST widget (outside Expanded),
+  so keyed reordering inside rows/columns preserves element state. A :test-id becomes
+  ValueKey(\"test-id:<id>\") just inside it, for widget tests (find.byKey).
+
+  Extension: (reg-adapter! :app/heatmap (fn [node ctx] widget)) — see
+  docs/STAGE_2_1_DESIGN.md §6."
+  (:require [cljd.flutter :as f]
+            [cloview.core.tree :as t]
+            [cloview.flutter.material :as mat]
+            [cloview.flutter.modal :as modal]
+            [cloview.flutter.split-view :as split]
+            [cloview.flutter.style :as style]
+            [cloview.flutter.text-input :as text-input]))
+
+(defonce ^:private registry (atom {}))
+
+(declare builtin-adapters)
+
+(defn reg-adapter!
+  "Register (f node ctx) -> Widget for `tag`. Later registrations win."
+  [tag f]
+  (swap! registry assoc tag f)
+  tag)
+
+(defn registered-tags
+  "Tags with an adapter (built-in or registered)."
+  []
+  (into (set (keys builtin-adapters)) (keys @registry)))
+
+(defn render-node
+  "Canonical node -> Widget, without identity keys (parents apply them). User
+  registrations (reg-adapter!) take precedence over the built-in adapters."
+  [node ctx]
+  (if-some [f (or (get @registry (:tag node)) (get builtin-adapters (:tag node)))]
+    (f node ctx)
+    (throw (ex-info (str "No Flutter adapter for " (:tag node)
+                         " — register one with cloview.flutter.adapters/reg-adapter!")
+                    {:tag (:tag node)}))))
+
+(defn with-identity
+  "Wrap `w` with the node's test-id key and, outside it, its identity key. Both can be
+  present (keyed chips, calendar cells, natives): the identity key is the outermost one,
+  which Flutter uses to match siblings; the test-id key sits inside it for widget tests.
+  KeyedSubtree is a StatelessWidget, so an Expanded inside it is still a valid Flex child."
+  [node w]
+  (let [tid (get-in node [:props :test-id])
+        w (if (some? tid) (mat/keyed (str "test-id:" tid) w) w)]
+    (if (some? (:key node)) (mat/keyed (:key node) w) w)))
+
+(defn render
+  "Canonical node -> keyed Widget."
+  [node ctx]
+  (with-identity node (render-node node ctx)))
+
+(defn render-root
+  "Hiccup view -> Widget (empty box for nil)."
+  [view ctx]
+  (if-some [n (t/normalize view)]
+    (render n ctx)
+    (mat/empty-box)))
+
+(defn- dispatch-fn [ctx] (:dispatch! ctx))
+
+;; ---------------------------------------------------------------------------
+;; Layout
+
+(defn- flex-adapter [{:keys [tag props children]} ctx]
+  (let [nstyle (style/normalize props)
+        vertical? (= tag :ui/column)
+        align (:align props (t/default-align tag))
+        kids (mapv (fn [c]
+                     (let [w (render-node c ctx)
+                           g (t/effective-grow tag c)]
+                       (with-identity c (if (pos? g) (mat/expanded g w) w))))
+                   children)
+        opts {:gap (:gap props) :justify (:justify props) :align align}
+        box (if vertical? (mat/column opts kids) (mat/row opts kids))
+        ;; a stretching row needs a bounded height: size it to its tallest child
+        box (if (and (not vertical?) (= align :stretch)) (mat/intrinsic-height box) box)]
+    (style/wrap-box nstyle box)))
+
+(defn- wrap-adapter [{:keys [props children]} ctx]
+  (style/wrap-box (style/normalize props)
+                  (mat/wrap {:gap (:gap props) :run-gap (:run-gap props)}
+                            (mapv #(render % ctx) children))))
+
+(defn- grid-adapter [{:keys [props children]} ctx]
+  (let [nstyle (style/normalize props)
+        gap (double (or (:gap props) 0))
+        cells (mapv (fn [c]
+                      {:row (int (or (get-in c [:props :grid/row]) 0))
+                       :col (int (or (get-in c [:props :grid/col]) 0))
+                       :widget (render c ctx)})
+                    children)
+        nrows (inc (reduce max -1 (map :row cells)))
+        ncols (max (count (:columns props)) (inc (reduce max -1 (map :col cells))))
+        tracks (vec (take ncols (concat (:columns props) (repeat :auto))))
+        at (into {} (map (fn [c] [[(:row c) (:col c)] (:widget c)])) cells)
+        rows (vec (for [r (range nrows)]
+                    (vec (for [c (range ncols)]
+                           (let [w (get at [r c] (mat/empty-box))]
+                             (mat/padding (mat/insets {:top 0.0 :left 0.0
+                                                       :right (if (< c (dec ncols)) gap 0.0)
+                                                       :bottom (if (< r (dec nrows)) gap 0.0)})
+                                          ;; cells fill their column (canonical rule); intrinsic
+                                          ;; columns size to their content (same predicate as
+                                          ;; mat/table: px or {:fr n} tracks are definite)
+                                          (if (mat/definite-track? (nth tracks c)) (mat/fill-width w) w)))))))]
+    ;; V1 limitation: Flutter's Table has no spans; a spanning cell renders in its
+    ;; first row/column only (documented in docs/STAGE_2_1_DESIGN.md §7).
+    (style/wrap-box nstyle (mat/table rows tracks))))
+
+(defn- single-child [node ctx]
+  (if-some [c (first (:children node))] (render c ctx) (mat/empty-box)))
+
+(defn- scroll-adapter [{:keys [props] :as node} ctx]
+  (style/wrap-box (style/normalize props)
+                  (mat/scroll (:direction props :vertical) (single-child node ctx))))
+
+(defn- box-adapter [{:keys [props] :as node} ctx]
+  (style/wrap-box (style/normalize props) (single-child node ctx)))
+
+(defn- align-adapter [{:keys [props] :as node} ctx]
+  (style/wrap-box (style/normalize props)
+                  (mat/align (:align props :center) (single-child node ctx))))
+
+(defn- spacer-adapter [_ _] (mat/empty-box))
+
+;; ---------------------------------------------------------------------------
+;; Controls
+
+(defn- text-adapter [{:keys [props]} _ctx]
+  (let [nstyle (style/normalize props)]
+    (style/wrap-box nstyle
+                    (mat/text (:text props "")
+                              (style/text-style nstyle)
+                              (style/text-align nstyle)
+                              (:wrap? props)))))
+
+(defn- button-adapter [{:keys [props]} ctx]
+  (let [h (:on-press props)
+        d (dispatch-fn ctx)]
+    (style/wrap-box (style/normalize props)
+                    (mat/button (:label props "")
+                                (fn [] (t/emit! d h :none nil) nil)
+                                (and (some? h) (not (:disabled? props)))))))
+
+(defn- text-input-adapter [{:keys [props]} ctx]
+  (text-input/text-input-widget props (dispatch-fn ctx)))
+
+(defn- toggle [control-fn {:keys [props]} ctx]
+  (let [h (:on-toggle props)
+        d (dispatch-fn ctx)]
+    (style/wrap-box (style/normalize props)
+                    (mat/labelled (control-fn (boolean (:checked props))
+                                              (fn [v] (t/emit! d h :boolean (true? v)) nil)
+                                              (and (some? h) (not (:disabled? props))))
+                                  (:label props)))))
+
+(defn- checkbox-adapter [node ctx] (toggle mat/checkbox node ctx))
+(defn- switch-adapter [node ctx] (toggle mat/switch-control node ctx))
+
+(defn- toggle-chip-adapter
+  ":ui/toggle as a Material FilterChip (selected state shown with a check mark)."
+  [{:keys [props]} ctx]
+  (let [h (:on-toggle props)
+        d (dispatch-fn ctx)]
+    (style/wrap-box (style/normalize props)
+                    (mat/filter-chip (:label props "")
+                                     (boolean (:checked props))
+                                     (fn [v] (t/emit! d h :boolean (true? v)) nil)
+                                     (and (some? h) (not (:disabled? props)))))))
+
+(defn- select-adapter [{:keys [props]} ctx]
+  (let [options (vec (:options props))
+        labels (mapv (fn [o] (str (or (:label o) (:value o)))) options)
+        idx (first (keep-indexed (fn [i o] (when (= (:value o) (:value props)) i)) options))
+        h (:on-select props)
+        d (dispatch-fn ctx)]
+    (style/wrap-box (style/normalize props)
+                    (mat/dropdown labels idx (:placeholder props)
+                                  (fn [i]
+                                    (when (some? i)
+                                      (t/emit! d h :value (:value (nth options i)))))
+                                  (and (some? h) (not (:disabled? props)))))))
+
+(defn- image-adapter [{:keys [props]} _ctx]
+  (let [nstyle (style/normalize props)]
+    (style/wrap-box (dissoc nstyle :width :height)
+                    (mat/image (:src props) (:fit props) (:width nstyle) (:height nstyle)))))
+
+;; ---------------------------------------------------------------------------
+;; Composites
+
+(defn- split-view-adapter [{:keys [props children]} ctx]
+  (style/wrap-box (style/normalize props)
+                  (split/split-view-widget props (mapv #(render % ctx) children) (dispatch-fn ctx))))
+
+(defn- tabs-adapter [{:keys [props children]} ctx]
+  (let [nstyle (style/normalize props)
+        ids (mapv (fn [tab] (get-in tab [:props :id])) children)
+        labels (mapv (fn [tab] (str (or (get-in tab [:props :label]) (get-in tab [:props :id])))) children)
+        n (count children)
+        idx (or (first (keep-indexed (fn [i id] (when (= id (:selected props)) i)) ids)) 0)
+        contents (mapv (fn [tab] (single-child tab ctx)) children)
+        h (:on-select props)
+        d (dispatch-fn ctx)]
+    (if (zero? n)
+      (mat/empty-box)
+      (f/widget
+       :vsync vsync
+       :managed [ctrl (mat/tab-controller n vsync idx) :refresh-on n]
+       :let [_ (when-not (= idx (mat/tab-index ctrl))
+                 (mat/post-frame! (fn [] (mat/animate-tab! ctrl idx))))]
+       (style/wrap-box nstyle
+                       ;; with a bounded height (tabs grow in a column, or have a :style
+                       ;; :height) the pages fill what the tab bar leaves; unbounded (tabs
+                       ;; inside a vertical scroll) they keep their own height
+                       (mat/layout-builder
+                        (fn [_max-w max-h]
+                          (mat/column {:gap 4 :align :stretch}
+                                      [(mat/tab-bar ctrl labels
+                                                    (fn [i] (t/emit! d h :value (nth ids i)) nil))
+                                       (cond->> (mat/indexed-stack idx contents)
+                                         (some? max-h) (mat/expanded 1))]))))))))
+
+(defn- tab-adapter [node _]
+  (throw (ex-info ":ui/tab is only valid as a direct child of :ui/tabs" {:node node})))
+
+(defn- modal-adapter [{:keys [props] :as node} ctx]
+  (modal/modal-widget props (single-child node ctx) (dispatch-fn ctx)))
+
+(defn- native-adapter
+  "Escape hatch: :host {:build (fn [build-context props] widget)}. The widget is
+  memoized on :props, so a rebuild with equal props returns the identical Widget
+  instance and Flutter skips that subtree (no stutter for heavy painters)."
+  [{:keys [props]} _ctx]
+  (let [build (get-in props [:host :build])
+        p (:props props)]
+    (when-not (fn? build)
+      (throw (ex-info ":ui/native on Flutter needs :host {:build (fn [ctx props] widget)}"
+                      {:props (dissoc props :host)})))
+    (f/widget
+     :context bctx
+     :managed [memo (volatile! nil) :dispose nil :refresh-on nil]
+     (let [m @memo]
+       (if (and (some? m) (= p (:props m)))
+         (:widget m)
+         (let [w (build bctx p)]
+           (vreset! memo {:props p :widget w})
+           w))))))
+
+;; ---------------------------------------------------------------------------
+;; Built-in adapters
+;;
+;; A def'd map, not top-level reg-adapter! calls: ClojureDart emits definitions only
+;; (top-level side effects never run), and top-level fields are initialized lazily on
+;; first use — `render-node` consults this map after the user registry.
+
+(def builtin-adapters
+  {:ui/column flex-adapter
+   :ui/row flex-adapter
+   :ui/grid grid-adapter
+   :ui/wrap wrap-adapter
+   :ui/scroll scroll-adapter
+   :ui/box box-adapter
+   :ui/align align-adapter
+   :ui/spacer spacer-adapter
+   :ui/text text-adapter
+   :ui/button button-adapter
+   :ui/text-input text-input-adapter
+   :ui/checkbox checkbox-adapter
+   :ui/switch switch-adapter
+   :ui/toggle toggle-chip-adapter
+   :ui/select select-adapter
+   :ui/image image-adapter
+   :ui/split-view split-view-adapter
+   :ui/tabs tabs-adapter
+   :ui/tab tab-adapter
+   :ui/modal modal-adapter
+   :ui/native native-adapter})

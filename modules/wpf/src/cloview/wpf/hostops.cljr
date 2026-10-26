@@ -1,0 +1,595 @@
+;; SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
+(ns cloview.wpf.hostops
+  "WPF implementation of cloview.core.reconcile/HostOps.
+
+  Element mapping (V1):
+    :ui/column :ui/row    Border > Grid (one track per child, pixel gap tracks between them;
+                          Star tracks for growing children, Auto otherwise)
+    :ui/grid              Border > Grid (gap tracks interleaved; spans widened accordingly)
+    :ui/wrap              Border > WrapPanel (gap as child margins; children kept in order,
+                          a moved child is re-inserted)
+    :ui/scroll            Border > ScrollViewer
+    :ui/box :ui/align     Border (single child; :align sets the child's alignment)
+    :ui/spacer            empty Border (grows in its parent)
+    :ui/text              TextBlock          :ui/button      Button
+    :ui/text-input        TextBox (PasswordBox when :password? at creation)
+    :ui/checkbox :ui/switch CheckBox (V1: no native switch on WPF, documented)
+    :ui/toggle            ToggleButton (filter chip)
+    :ui/select            ComboBox (string items; values kept in element state)
+    :ui/image             Image + BitmapImage; local .gif files animate (cloview.wpf.gif)
+    :ui/split-view        Border > Grid [pane | GridSplitter | pane]
+    :ui/tabs / :ui/tab    TabControl / TabItem
+    :ui/modal             collapsed placeholder in the tree + an overlay (barrier + card)
+                          in the window's overlay layer — no ShowDialog nested loop
+    :ui/native            user UIElement with :create/:update/:dispose
+
+  Children of flex/grid panels are positioned with Grid.Row/Grid.Column, never by their
+  index in Panel.Children, so replace-children! only adds/removes elements: existing
+  ones are never detached and keep focus, caret and scroll state.
+
+  All event handlers are attached once, in create-element, and call the reconciler's
+  stable `emit`; programmatic writes during a render pass are swallowed by the
+  reconciler's re-entrancy guard."
+  (:require [cloview.core.reconcile :as r]
+            [cloview.core.tree :as t]
+            [cloview.wpf.gif :as gif]
+            [cloview.wpf.interop :as wpf]))
+
+(import '[System.Windows FrameworkElement UIElement Visibility HorizontalAlignment
+          VerticalAlignment TextWrapping RoutedEventHandler]
+        '[System.Windows.Controls Border Grid RowDefinition ColumnDefinition ScrollViewer
+          ScrollBarVisibility TextBlock Button TextBox PasswordBox CheckBox ComboBox Image
+          GridSplitter TabControl TabItem StackPanel Panel UIElementCollection WrapPanel
+          TextChangedEventHandler SelectionChangedEventHandler]
+        '[System.Windows.Controls.Primitives DragCompletedEventHandler ToggleButton]
+        '[System.Windows.Input KeyEventHandler MouseButtonEventHandler Key]
+        '[System.Windows.Media Stretch]
+        '[System.Windows.Media.Imaging BitmapImage])
+
+;; ---------------------------------------------------------------------------
+;; Shared helpers
+
+(defn- st [el] @(wpf/state el))
+(defn- st-swap! [el f & args] (apply swap! (wpf/state el) f args))
+(defn- inner [el] (:inner (st el)))
+
+(defn- sync-children!
+  "Make `coll` (UIElementCollection) contain exactly `kids` without detaching the
+  elements that stay (order in the collection is irrelevant: Grid cells position them)."
+  [^UIElementCollection coll kids]
+  (let [want (set kids)
+        have (vec (seq coll))]
+    (doseq [c have :when (not (contains? want c))] (.Remove coll ^UIElement c))
+    (let [present (set (seq coll))]
+      (doseq [k kids :when (not (contains? present k))] (.Add coll ^UIElement k)))))
+
+(defn- sync-defs!
+  "Make a Row/ColumnDefinitionCollection hold exactly `tracks` (GridLength values)."
+  [defs row? tracks]
+  (let [n (count tracks)]
+    (while (> (.Count defs) n) (.RemoveAt defs (dec (.Count defs))))
+    (while (< (.Count defs) n) (.Add defs (if row? (RowDefinition.) (ColumnDefinition.))))
+    (doseq [[i track] (map-indexed vector tracks)]
+      (let [d (.get_Item defs (int i))]
+        (if row?
+          (when-not (.Equals ^Object (.Height ^RowDefinition d) track) (.set_Height ^RowDefinition d track))
+          (when-not (.Equals ^Object (.Width ^ColumnDefinition d) track) (.set_Width ^ColumnDefinition d track)))))))
+
+(defn- set-cell! [el row col row-span col-span]
+  (Grid/SetRow ^UIElement el (int row))
+  (Grid/SetColumn ^UIElement el (int col))
+  (Grid/SetRowSpan ^UIElement el (int (max 1 row-span)))
+  (Grid/SetColumnSpan ^UIElement el (int (max 1 col-span))))
+
+;; ---------------------------------------------------------------------------
+;; Wrap
+
+(defn- sync-children-ordered!
+  "Make `coll` hold exactly `kids` in this order, for panels that position children by
+  their index (WrapPanel). Elements already in place are not touched; a moved element is
+  removed and re-inserted (it loses keyboard focus; documented for :ui/wrap)."
+  [^UIElementCollection coll kids]
+  (let [want (set kids)]
+    (doseq [c (vec (seq coll)) :when (not (contains? want c))] (.Remove coll ^UIElement c))
+    (doseq [[i k] (map-indexed vector kids)]
+      (when-not (and (< i (.Count coll)) (identical? k (.get_Item coll (int i))))
+        (when (.Contains coll ^UIElement k) (.Remove coll ^UIElement k))
+        (.Insert coll (int i) ^UIElement k)))))
+
+(defn- relayout-wrap!
+  "WrapPanel has no spacing: every child gets a right/bottom slot margin of :gap /
+  :run-gap (added to its own style margin, see wpf/apply-margin!) and the panel a
+  negative margin of the same size, so the outer edges stay flush."
+  [el]
+  (let [{:keys [kids props]} (st el)
+        gap (double (or (:gap props) 0))
+        run-gap (double (or (:run-gap props) gap))
+        ^WrapPanel panel (inner el)]
+    (.set_Margin panel (System.Windows.Thickness. 0.0 0.0 (- gap) (- run-gap)))
+    (doseq [k kids :when (instance? FrameworkElement k)]
+      (swap! (wpf/state k) assoc :slot-margin {:top 0.0 :right gap :bottom run-gap :left 0.0})
+      (wpf/apply-margin! k))))
+
+;; ---------------------------------------------------------------------------
+;; Flex (column / row)
+
+(defn- relayout-flex! [el]
+  (let [{:keys [kids slots props vertical?]} (st el)
+        ^Grid g (inner el)
+        gap (double (or (:gap props) 0))
+        grows (mapv #(or (:grow (get slots %)) 0) kids)
+        any-grow? (some pos? grows)
+        justify (if any-grow? :start (or (:justify props) :start))
+        lead? (contains? #{:center :end} justify)
+        trail? (= justify :center)
+        tracks (-> (if lead? [(wpf/star 1)] [])
+                   (into (interpose (wpf/pixels gap)
+                                    (map (fn [gr] (if (pos? gr) (wpf/star gr) wpf/auto)) grows)))
+                   (cond-> trail? (conj (wpf/star 1))))
+        offset (if lead? 1 0)
+        align (or (:align props) (t/default-align (if vertical? :ui/column :ui/row)))]
+    (sync-defs! (if vertical? (.RowDefinitions g) (.ColumnDefinitions g)) vertical? tracks)
+    (sync-defs! (if vertical? (.ColumnDefinitions g) (.RowDefinitions g)) (not vertical?) [(wpf/star 1)])
+    (doseq [[i k] (map-indexed vector kids)]
+      (let [idx (+ offset (* 2 i))]
+        (if vertical? (set-cell! k idx 0 1 1) (set-cell! k 0 idx 1 1))
+        (if vertical?
+          (wpf/set-dp! k "HorizontalAlignment" (wpf/h-align align))
+          (wpf/set-dp! k "VerticalAlignment" (wpf/v-align align)))))))
+
+;; ---------------------------------------------------------------------------
+;; Grid
+
+(defn- track->length [track]
+  (cond
+    (number? track) (wpf/pixels track)
+    (and (map? track) (:fr track)) (wpf/star (:fr track))
+    :else wpf/auto))
+
+(defn- relayout-grid! [el]
+  (let [{:keys [kids slots props]} (st el)
+        ^Grid g (inner el)
+        gap (double (or (:gap props) 0))
+        cells (mapv (fn [k]
+                      (let [l (:layout (get slots k))]
+                        {:el k
+                         :row (int (or (:grid/row l) 0))
+                         :col (int (or (:grid/col l) 0))
+                         :row-span (int (or (:grid/row-span l) 1))
+                         :col-span (int (or (:grid/col-span l) 1))}))
+                    kids)
+        nrows (max (count (:rows props)) (reduce max 0 (map #(+ (:row %) (:row-span %)) cells)))
+        ncols (max (count (:columns props)) (reduce max 0 (map #(+ (:col %) (:col-span %)) cells)))
+        col-tracks (mapv #(track->length (get (:columns props) % :auto)) (range ncols))
+        row-tracks (mapv #(track->length (get (:rows props) % :auto)) (range nrows))]
+    (sync-defs! (.ColumnDefinitions g) false (vec (interpose (wpf/pixels gap) col-tracks)))
+    (sync-defs! (.RowDefinitions g) true (vec (interpose (wpf/pixels gap) row-tracks)))
+    (doseq [{:keys [el row col row-span col-span]} cells]
+      (set-cell! el (* 2 row) (* 2 col) (dec (* 2 row-span)) (dec (* 2 col-span))))))
+
+;; ---------------------------------------------------------------------------
+;; Split view
+
+(defn- relayout-split! [el]
+  (let [{:keys [kids props]} (st el)
+        ^Grid g (inner el)
+        vertical? (= :vertical (:orientation props))
+        ratio (double (max 0.05 (min 0.95 (or (:ratio props) 0.5))))
+        tracks [(wpf/star ratio) (wpf/pixels 5) (wpf/star (- 1.0 ratio))]
+        ^GridSplitter splitter (:splitter (st el))]
+    (sync-defs! (if vertical? (.RowDefinitions g) (.ColumnDefinitions g)) vertical? tracks)
+    (sync-defs! (if vertical? (.ColumnDefinitions g) (.RowDefinitions g)) (not vertical?) [(wpf/star 1)])
+    (if vertical?
+      (do (set-cell! splitter 1 0 1 1)
+          (wpf/set-dp! splitter "HorizontalAlignment" HorizontalAlignment/Stretch)
+          (wpf/set-dp! splitter "VerticalAlignment" VerticalAlignment/Stretch))
+      (do (set-cell! splitter 0 1 1 1)
+          (wpf/set-dp! splitter "HorizontalAlignment" HorizontalAlignment/Stretch)
+          (wpf/set-dp! splitter "VerticalAlignment" VerticalAlignment/Stretch)))
+    (doseq [[i k] (map-indexed vector kids)]
+      (let [pos (if (zero? i) 0 2)]
+        (if vertical? (set-cell! k pos 0 1 1) (set-cell! k 0 pos 1 1))))))
+
+(defn- split-ratio [el]
+  (let [{:keys [props]} (st el)
+        ^Grid g (inner el)
+        vertical? (= :vertical (:orientation props))
+        sizes (if vertical?
+                [(.ActualHeight (.get_Item (.RowDefinitions g) 0)) (.ActualHeight (.get_Item (.RowDefinitions g) 2))]
+                [(.ActualWidth (.get_Item (.ColumnDefinitions g) 0)) (.ActualWidth (.get_Item (.ColumnDefinitions g) 2))])
+        total (+ (first sizes) (second sizes))]
+    (when (pos? total) (/ (first sizes) total))))
+
+;; ---------------------------------------------------------------------------
+;; Tabs, select, image
+
+(defn- apply-tab-selection!
+  "Show the tab whose :id equals :selected. With no (or an unknown) :selected the first
+  tab is shown, selected here inside the render pass: left to itself, WPF's TabControl
+  selects index 0 on its first layout, outside the pass, and its SelectionChanged would
+  reach the app as an :on-select nobody made (JavaFX and Flutter show the first tab
+  without an event too)."
+  [^TabControl tc]
+  (let [sel (:selected (st tc))
+        items (vec (seq (.Items tc)))
+        idx (or (first (keep-indexed (fn [i item] (when (= sel (:id (st item))) i)) items))
+                (when (seq items) 0))]
+    (when (and (some? idx) (not= idx (.SelectedIndex tc)))
+      (.set_SelectedIndex tc (int idx)))))
+
+(defn- apply-select! [^ComboBox cb]
+  (let [{:keys [values selected]} (st cb)
+        idx (or (first (keep-indexed (fn [i v] (when (= v selected) i)) values)) -1)]
+    (when-not (= idx (.SelectedIndex cb))
+      (.set_SelectedIndex cb (int idx)))))
+
+(defn- image-uri [src]
+  (cond
+    (:url src) (System.Uri. (str (:url src)) System.UriKind/Absolute)
+    (:file src) (System.Uri. (System.IO.Path/GetFullPath (str (:file src))) System.UriKind/Absolute)
+    (:asset src) (System.Uri. (System.IO.Path/Combine System.AppContext/BaseDirectory "assets" (str (:asset src)))
+                              System.UriKind/Absolute)
+    :else nil))
+
+(defn- image-source [src]
+  (try
+    (when-some [uri (image-uri src)] (BitmapImage. uri))
+    (catch System.Exception _ nil)))
+
+(defn- local-gif
+  "Decoded animation for a local (:file / :asset) .gif source, else nil. Remote GIFs stay
+  still: decoding them here would block the UI thread on the download."
+  [src]
+  (when (and (or (:file src) (:asset src)) (gif/gif-path? (or (:file src) (:asset src))))
+    (try (gif/decode (image-uri src))
+         (catch System.Exception _ nil))))
+
+(defn- set-image-src! [^Image img src]
+  (gif/stop! (:gif (st img)))
+  (st-swap! img dissoc :gif)
+  (if-some [anim (local-gif src)]
+    (st-swap! img assoc :gif (gif/start! img anim))
+    (.set_Source img (image-source src))))
+
+(defn- stretch [fit]
+  (case fit :cover Stretch/UniformToFill :fill Stretch/Fill Stretch/Uniform))
+
+;; ---------------------------------------------------------------------------
+;; Modal overlay
+
+(defn- make-overlay [placeholder emit]
+  (let [overlay (Grid.)
+        card (Border.)
+        stack (StackPanel.)
+        title (TextBlock.)
+        content (Border.)]
+    (doto overlay
+      (.set_Background (wpf/brush "#0000008a"))
+      (.set_Visibility Visibility/Collapsed))
+    (doto title (.set_FontSize 18.0) (.set_Margin (wpf/thickness {:top 0 :right 0 :bottom 12 :left 0} :map)))
+    (.Add (.Children stack) title)
+    (.Add (.Children stack) content)
+    (doto card
+      (.set_Background (wpf/brush "#ffffff"))
+      (.set_CornerRadius (System.Windows.CornerRadius. 8.0))
+      (.set_Padding (wpf/thickness 16))
+      (.set_MinWidth 240.0)
+      (.set_HorizontalAlignment HorizontalAlignment/Center)
+      (.set_VerticalAlignment VerticalAlignment/Center)
+      (.set_Child stack))
+    (.Add (.Children overlay) card)
+    ;; barrier click (not on the card) => :on-dismiss
+    (.add_MouseLeftButtonDown overlay
+                              (gen-delegate MouseButtonEventHandler [_ e]
+                                (when (identical? (.OriginalSource e) overlay)
+                                  (emit :on-dismiss nil))))
+    (swap! (wpf/state placeholder) assoc :overlay overlay :title-block title :content content)
+    overlay))
+
+;; ---------------------------------------------------------------------------
+;; Element creation
+
+(defn- container [tag inner-el]
+  (let [b (Border.)]
+    (when inner-el (.set_Child b inner-el))
+    (swap! (wpf/state b) assoc :tag tag :inner inner-el :kids [] :slots {} :props {})
+    b))
+
+(defn- create [ops-state tag node emit]
+  (case tag
+    (:ui/column :ui/row)
+    (let [b (container tag (Grid.))]
+      (st-swap! b assoc :vertical? (= tag :ui/column))
+      b)
+
+    :ui/grid (container tag (Grid.))
+
+    :ui/wrap (container tag (WrapPanel.))
+
+    :ui/split-view
+    (let [g (Grid.)
+          splitter (GridSplitter.)
+          b (container tag g)]
+      (.set_ShowsPreview splitter false)
+      (.set_Background splitter (wpf/brush "#00000033"))
+      (.Add (.Children g) splitter)
+      (st-swap! b assoc :splitter splitter)
+      (.add_DragCompleted splitter
+                          (gen-delegate DragCompletedEventHandler [_ _]
+                            (when-some [ratio (split-ratio b)] (emit :on-resize ratio))))
+      (relayout-split! b)
+      b)
+
+    :ui/scroll (container tag (ScrollViewer.))
+
+    (:ui/box :ui/align :ui/spacer) (container tag nil)
+
+    :ui/text (TextBlock.)
+
+    :ui/button
+    (let [btn (Button.)]
+      (.add_Click btn (gen-delegate RoutedEventHandler [_ _] (emit :on-press nil)))
+      btn)
+
+    :ui/text-input
+    (if (get-in node [:props :password?])
+      (let [pb (PasswordBox.)]
+        (.add_PasswordChanged pb (gen-delegate RoutedEventHandler [_ _] (emit :on-change (.Password pb))))
+        (swap! (wpf/state pb) assoc :password? true)
+        pb)
+      (let [tb (TextBox.)]
+        (.add_TextChanged tb (gen-delegate TextChangedEventHandler [_ _] (emit :on-change (.Text tb))))
+        (.add_KeyDown tb (gen-delegate KeyEventHandler [_ e]
+                           (when (= (.Key e) Key/Enter) (emit :on-submit (.Text tb)))))
+        tb))
+
+    (:ui/checkbox :ui/switch :ui/toggle)
+    (let [^ToggleButton tb (if (= tag :ui/toggle) (ToggleButton.) (CheckBox.))]
+      (.add_Checked tb (gen-delegate RoutedEventHandler [_ _] (emit :on-toggle true)))
+      (.add_Unchecked tb (gen-delegate RoutedEventHandler [_ _] (emit :on-toggle false)))
+      tb)
+
+    :ui/select
+    (let [cb (ComboBox.)]
+      (.add_SelectionChanged cb
+                             (gen-delegate SelectionChangedEventHandler [_ _]
+                               (let [i (.SelectedIndex cb)
+                                     values (:values (st cb))]
+                                 (when (and (>= i 0) (< i (count values)))
+                                   (emit :on-select (nth values i))))))
+      cb)
+
+    :ui/image (Image.)
+
+    :ui/tabs
+    (let [tc (TabControl.)]
+      (.add_SelectionChanged tc
+                             (gen-delegate SelectionChangedEventHandler [_ e]
+                               ;; SelectionChanged bubbles from ComboBoxes inside tab content
+                               (when (identical? (.OriginalSource e) tc)
+                                 (when-some [item (.SelectedItem tc)]
+                                   (emit :on-select (:id (st item)))))))
+      tc)
+
+    :ui/tab (TabItem.)
+
+    :ui/modal
+    (let [placeholder (container tag nil)
+          layer (:overlay-layer @ops-state)]
+      (.set_Visibility placeholder Visibility/Collapsed)
+      (if layer
+        (.Add (.Children ^Panel layer) (make-overlay placeholder emit))
+        (println "cloview: :ui/modal without an overlay layer (mount through cloview.wpf.app)"))
+      placeholder)
+
+    :ui/native
+    (let [create-fn (get-in node [:props :host :create])
+          el (when (fn? create-fn) (create-fn))]
+      (when-not (instance? UIElement el)
+        (throw (ex-info ":ui/native on WPF needs :host {:create (fn [] ui-element) ...}"
+                        {:props (dissoc (:props node) :host)})))
+      (swap! ops-state assoc-in [:natives el] (get-in node [:props :host]))
+      el)
+
+    (throw (ex-info (str "No WPF adapter for " tag) {:tag tag}))))
+
+;; ---------------------------------------------------------------------------
+;; Prop patching
+
+(def ^:private text-bearing #{:ui/text :ui/button :ui/text-input :ui/checkbox :ui/switch
+                              :ui/toggle :ui/select :ui/tab})
+
+(defn- patch! [ops-state el tag changed]
+  (when (contains? changed :test-id) (wpf/set-test-id! el (:test-id changed)))
+  (when (contains? changed :disabled?) (wpf/set-dp! el "IsEnabled" (when (:disabled? changed) false)))
+  (when (contains? changed :style)
+    (when-not (contains? #{:ui/modal :ui/native} tag)
+      (wpf/apply-style! el (:style changed) (contains? text-bearing tag))))
+  (case tag
+    (:ui/column :ui/row)
+    (do (st-swap! el update :props merge (select-keys changed [:gap :align :justify]))
+        (relayout-flex! el))
+
+    :ui/grid
+    (do (st-swap! el update :props merge (select-keys changed [:gap :columns :rows]))
+        (relayout-grid! el))
+
+    :ui/wrap
+    (do (st-swap! el update :props merge (select-keys changed [:gap :run-gap]))
+        (relayout-wrap! el))
+
+    :ui/split-view
+    (do (st-swap! el update :props merge (select-keys changed [:ratio :orientation]))
+        (relayout-split! el))
+
+    :ui/scroll
+    (when (contains? changed :direction)
+      (let [^ScrollViewer sv (inner el)
+            dir (or (:direction changed) :vertical)]
+        (.set_VerticalScrollBarVisibility sv (if (= dir :horizontal) ScrollBarVisibility/Disabled ScrollBarVisibility/Auto))
+        (.set_HorizontalScrollBarVisibility sv (if (= dir :vertical) ScrollBarVisibility/Disabled ScrollBarVisibility/Auto))))
+
+    :ui/align
+    (when (contains? changed :align)
+      (st-swap! el assoc-in [:props :align] (:align changed))
+      (when-some [c (.Child ^Border el)]
+        (let [[h v] (wpf/align9 (or (:align changed) :center))]
+          (wpf/set-dp! c "HorizontalAlignment" h)
+          (wpf/set-dp! c "VerticalAlignment" v))))
+
+    :ui/text
+    (let [^TextBlock tb el]
+      (when (contains? changed :text) (.set_Text tb (str (:text changed))))
+      (when (contains? changed :wrap?)
+        (.set_TextWrapping tb (if (:wrap? changed) TextWrapping/Wrap TextWrapping/NoWrap))))
+
+    :ui/button
+    (when (contains? changed :label) (.set_Content ^Button el (str (:label changed))))
+
+    :ui/text-input
+    (when (contains? changed :value)
+      (let [v (str (or (:value changed) ""))]
+        (if (:password? (st el))
+          (when-not (= v (.Password ^PasswordBox el)) (.set_Password ^PasswordBox el v))
+          (let [^TextBox tb el]
+            (when-not (= v (.Text tb))
+              (let [caret (.CaretIndex tb)]
+                (.set_Text tb v)
+                (.set_CaretIndex tb (int (r/preserve-caret caret v)))))))))
+
+    (:ui/checkbox :ui/switch :ui/toggle)
+    (let [^ToggleButton tb el]
+      (when (contains? changed :checked) (wpf/set-dp! tb "IsChecked" (boolean (:checked changed))))
+      (when (contains? changed :label) (.set_Content tb (str (or (:label changed) "")))))
+
+    :ui/select
+    (let [^ComboBox cb el]
+      (when (contains? changed :options)
+        (let [options (vec (:options changed))]
+          (st-swap! cb assoc :values (mapv :value options))
+          (.set_ItemsSource cb (into-array String (map #(str (or (:label %) (:value %))) options)))))
+      (when (contains? changed :value) (st-swap! cb assoc :selected (:value changed)))
+      (apply-select! cb))
+
+    :ui/image
+    (let [^Image img el]
+      (when (contains? changed :src) (set-image-src! img (:src changed)))
+      (when (contains? changed :fit) (.set_Stretch img (stretch (:fit changed)))))
+
+    :ui/tabs
+    (when (contains? changed :selected)
+      (st-swap! el assoc :selected (:selected changed))
+      (apply-tab-selection! el))
+
+    :ui/tab
+    (let [^TabItem ti el]
+      (when (contains? changed :id) (st-swap! ti assoc :id (:id changed)))
+      (when (or (contains? changed :label) (contains? changed :id))
+        (.set_Header ti (str (or (:label changed) (:id changed) (:id (st ti)))))))
+
+    :ui/modal
+    (let [{:keys [overlay title-block]} (st el)]
+      (when (and overlay (contains? changed :open?))
+        (.set_Visibility ^UIElement overlay (wpf/visibility (:open? changed))))
+      (when (and title-block (contains? changed :title))
+        (.set_Text ^TextBlock title-block (str (or (:title changed) "")))))
+
+    :ui/native
+    (do (when (contains? changed :host)
+          (swap! ops-state assoc-in [:natives el] (:host changed)))
+        (when (contains? changed :props)
+          (when-some [update (get-in @ops-state [:natives el :update])]
+            (update el (:props changed)))))
+
+    nil))
+
+;; ---------------------------------------------------------------------------
+;; Children & slots
+
+(defn- replace-kids! [el tag kids]
+  (case tag
+    (:ui/column :ui/row :ui/grid :ui/split-view)
+    (let [^Grid g (inner el)
+          splitter (:splitter (st el))]
+      (sync-children! (.Children g) (cond-> (vec kids) splitter (conj splitter)))
+      (st-swap! el (fn [s] (-> s
+                               (assoc :kids (vec kids))
+                               (update :slots select-keys kids))))
+      (case tag
+        (:ui/column :ui/row) (relayout-flex! el)
+        :ui/grid (relayout-grid! el)
+        :ui/split-view (relayout-split! el)))
+
+    :ui/wrap
+    (do (sync-children-ordered! (.Children ^WrapPanel (inner el)) kids)
+        (st-swap! el assoc :kids (vec kids))
+        (relayout-wrap! el))
+
+    :ui/scroll (.set_Content ^ScrollViewer (inner el) (first kids))
+
+    (:ui/box :ui/align)
+    (let [c (first kids)]
+      (when-not (identical? c (.Child ^Border el)) (.set_Child ^Border el c))
+      (when (and c (= tag :ui/align))
+        (let [[h v] (wpf/align9 (or (get-in (st el) [:props :align]) :center))]
+          (wpf/set-dp! c "HorizontalAlignment" h)
+          (wpf/set-dp! c "VerticalAlignment" v))))
+
+    :ui/tabs
+    (let [^TabControl tc el
+          items (.Items tc)]
+      (when-not (= (vec (seq items)) (vec kids))
+        (.Clear items)
+        (doseq [k kids] (.Add items k)))
+      (apply-tab-selection! tc))
+
+    :ui/tab (.set_Content ^TabItem el (first kids))
+
+    :ui/modal
+    (when-some [^Border host (:content (st el))]
+      (let [c (first kids)]
+        (when-not (identical? c (.Child host)) (.set_Child host c))))
+
+    (throw (ex-info (str tag " takes no children") {:tag tag}))))
+
+(defn- attach-slot! [parent ptag child slot]
+  (case ptag
+    (:ui/column :ui/row :ui/grid :ui/split-view)
+    (do (st-swap! parent assoc-in [:slots child] slot)
+        (case ptag
+          (:ui/column :ui/row) (relayout-flex! parent)
+          :ui/grid (relayout-grid! parent)
+          :ui/split-view (relayout-split! parent)))
+    nil))
+
+(defn- destroy! [ops-state el tag]
+  (case tag
+    :ui/modal
+    (when-some [overlay (:overlay (st el))]
+      (when-some [layer (:overlay-layer @ops-state)]
+        (.Remove (.Children ^Panel layer) ^UIElement overlay)))
+
+    :ui/native
+    (do (when-some [dispose (get-in @ops-state [:natives el :dispose])] (dispose el))
+        (swap! ops-state update :natives dissoc el))
+
+    :ui/image
+    (do (gif/stop! (:gif (st el)))
+        (st-swap! el dissoc :gif))
+
+    nil))
+
+;; ---------------------------------------------------------------------------
+;; HostOps
+
+(defn wpf-host-ops
+  "HostOps for WPF. `overlay-layer` is the Panel (a Grid spanning the window) that hosts
+  :ui/modal overlays; cloview.wpf.app creates it."
+  [{:keys [overlay-layer]}]
+  (let [ops-state (atom {:overlay-layer overlay-layer :natives {}})]
+    (reify r/HostOps
+      (create-element [_ node emit] (create ops-state (:tag node) node emit))
+      (patch-props! [_ el tag changed _prev] (patch! ops-state el tag changed))
+      (replace-children! [_ el tag kids] (replace-kids! el tag kids))
+      (attach-child-slot! [_ parent ptag child slot] (attach-slot! parent ptag child slot))
+      (destroy-element! [_ el tag] (destroy! ops-state el tag)))))

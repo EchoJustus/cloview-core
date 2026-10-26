@@ -1,0 +1,8 @@
+;; cloview CLR backend (ClojureCLR + WPF). Resolved by cljr (git/local deps only).
+;;
+;; The WPF host does NOT depend on cljr's classpath: CloViewHost.exe loads the sources
+;; staged into <repo>/target/clr-src (bb wpf:sync / verify/run-windows-checks.ps1) by
+;; setting CLOJURE_LOAD_PATH itself. `cljr -Spath` here is a tooling check.
+{:paths ["src"]
+ :deps {cloview/core {:local/root "../core"}
+        cloview/fx {:local/root "../fx"}}}

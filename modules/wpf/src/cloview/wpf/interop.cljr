@@ -1,0 +1,196 @@
+;; SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
+(ns cloview.wpf.interop
+  "Low-level WPF helpers for the cloview CLR backend (ClojureCLR, Windows).
+
+  Properties are written through their DependencyProperty (looked up by name and
+  cached): `set-dp!` with nil means ClearValue, i.e. 'back to the theme/default value'
+  — exactly the reconciler's contract for removed props. This keeps style application
+  generic across TextBlock, Control, Border and Panel subclasses, which share property
+  names but not interfaces."
+  (:require [clojure.string :as str]
+            [cloview.core.color :as color]
+            [cloview.core.style :as style]))
+
+;; Make sure the WPF assemblies are loaded before any WPF type symbol below is compiled.
+;; The C# host (CloViewHost) already loads them; this keeps REPL sessions working too.
+(doseq [n ["WindowsBase" "PresentationCore" "PresentationFramework" "System.Xaml"]]
+  (try (System.Reflection.Assembly/Load ^String n)
+       (catch System.Exception _ nil)))
+
+(import '[System.Windows DependencyObject DependencyProperty FrameworkElement UIElement
+          Thickness GridLength GridUnitType HorizontalAlignment VerticalAlignment Visibility
+          FontWeight FontStyles TextAlignment TextWrapping CornerRadius]
+        '[System.Windows.Media BrushConverter FontFamily]
+        '[System.Windows.Automation AutomationProperties])
+
+;; ---------------------------------------------------------------------------
+;; DependencyProperty access
+
+(def ^:private dp-cache (atom {}))
+
+(defn dp
+  "DependencyProperty named `prop` (e.g. \"FontSize\") on the element's class, or nil."
+  [^Object el ^String prop]
+  (let [t (.GetType el)
+        k [t prop]]
+    (if (contains? @dp-cache k)
+      (get @dp-cache k)
+      (let [f (.GetField t (str prop "Property")
+                         (enum-or System.Reflection.BindingFlags/Public
+                                  System.Reflection.BindingFlags/Static
+                                  System.Reflection.BindingFlags/FlattenHierarchy))
+            d (when f (.GetValue f nil))]
+        (swap! dp-cache assoc k d)
+        d))))
+
+(defn set-dp!
+  "Set `prop` on `el` (nil => ClearValue). Silently ignores properties the element's
+  class does not have."
+  [el prop v]
+  (when-some [d (dp el prop)]
+    (if (nil? v)
+      (.ClearValue ^DependencyObject el ^DependencyProperty d)
+      (.SetValue ^DependencyObject el ^DependencyProperty d ^Object v)))
+  el)
+
+(defn get-dp [el prop]
+  (when-some [d (dp el prop)]
+    (.GetValue ^DependencyObject el ^DependencyProperty d)))
+
+;; ---------------------------------------------------------------------------
+;; Values
+
+(def ^:private brush-converter (BrushConverter.))
+
+(defn brush
+  "SolidColorBrush for any canonical color (via #AARRGGBB, WPF's alpha-first order)."
+  [c]
+  (when (some? c)
+    (.ConvertFromString ^BrushConverter brush-converter ^String (color/argb-hex c))))
+
+(defn thickness
+  ([n] (Thickness. (double n)))
+  ([{:keys [top right bottom left]} _]
+   (Thickness. (double left) (double top) (double right) (double bottom))))
+
+(defn insets->thickness [ins]
+  (when ins (thickness ins :map)))
+
+(defn star [n] (GridLength. (double n) GridUnitType/Star))
+(defn pixels [n] (GridLength. (double n) GridUnitType/Pixel))
+(def auto GridLength/Auto)
+
+(defn h-align [a]
+  (case a
+    :start HorizontalAlignment/Left
+    :center HorizontalAlignment/Center
+    :end HorizontalAlignment/Right
+    HorizontalAlignment/Stretch))
+
+(defn v-align [a]
+  (case a
+    :start VerticalAlignment/Top
+    :center VerticalAlignment/Center
+    :end VerticalAlignment/Bottom
+    VerticalAlignment/Stretch))
+
+(defn align9
+  "[HorizontalAlignment VerticalAlignment] for a 9-position :align keyword."
+  [a]
+  (case a
+    :top-left [HorizontalAlignment/Left VerticalAlignment/Top]
+    :top [HorizontalAlignment/Center VerticalAlignment/Top]
+    :top-right [HorizontalAlignment/Right VerticalAlignment/Top]
+    :left [HorizontalAlignment/Left VerticalAlignment/Center]
+    :right [HorizontalAlignment/Right VerticalAlignment/Center]
+    :bottom-left [HorizontalAlignment/Left VerticalAlignment/Bottom]
+    :bottom [HorizontalAlignment/Center VerticalAlignment/Bottom]
+    :bottom-right [HorizontalAlignment/Right VerticalAlignment/Bottom]
+    [HorizontalAlignment/Center VerticalAlignment/Center]))
+
+(defn visibility [visible?] (if visible? Visibility/Visible Visibility/Collapsed))
+
+(defn text-alignment [a]
+  (case a :center TextAlignment/Center :end TextAlignment/Right TextAlignment/Left))
+
+;; ---------------------------------------------------------------------------
+;; Per-element host state (an atom in FrameworkElement.Tag)
+
+(defn state
+  "The cloview state atom stored in the element's Tag (created on first use)."
+  [^FrameworkElement el]
+  (let [t (.Tag el)]
+    (if (instance? clojure.lang.Atom t)
+      t
+      (let [a (atom {})]
+        (.set_Tag el a)
+        a))))
+
+;; ---------------------------------------------------------------------------
+;; Style application
+
+(defn apply-text-style!
+  "Font/foreground part of a normalized style; absent keys are cleared."
+  [el nstyle]
+  (doto el
+    (set-dp! "Foreground" (brush (:color nstyle)))
+    (set-dp! "FontSize" (when-some [s (:font-size nstyle)] (double s)))
+    (set-dp! "FontWeight" (when-some [w (:font-weight nstyle)] (FontWeight/FromOpenTypeWeight (int w))))
+    (set-dp! "FontFamily" (when-some [f (:font-family nstyle)] (FontFamily. ^String f)))
+    (set-dp! "FontStyle" (when (:italic? nstyle) FontStyles/Italic))
+    (set-dp! "TextAlignment" (when-some [a (:text-align nstyle)] (text-alignment a)))))
+
+(defn- add-insets [a b]
+  (if (and a b)
+    {:top (+ (:top a) (:top b)) :right (+ (:right a) (:right b))
+     :bottom (+ (:bottom a) (:bottom b)) :left (+ (:left a) (:left b))}
+    (or a b)))
+
+(defn apply-margin!
+  "Margin = the element's style margin + the slot margin its parent assigned (the
+  :gap of a :ui/wrap, which WPF's WrapPanel cannot express); nil clears it."
+  [el]
+  (if (instance? FrameworkElement el)
+    (let [{:keys [style-margin slot-margin]} @(state el)]
+      (set-dp! el "Margin" (insets->thickness (add-insets style-margin slot-margin))))
+    el))
+
+(defn apply-box-style!
+  "Box part of a normalized style (background, border, radius, padding, margin,
+  opacity, sizes); absent keys are cleared."
+  [el nstyle]
+  (when (instance? FrameworkElement el)
+    (swap! (state el) assoc :style-margin (:margin nstyle)))
+  (apply-margin! el)
+  (doto el
+    (set-dp! "Background" (brush (:background nstyle)))
+    (set-dp! "BorderBrush" (when (:border-width nstyle) (brush (:border-color nstyle))))
+    (set-dp! "BorderThickness" (when-some [w (:border-width nstyle)] (thickness w)))
+    (set-dp! "CornerRadius" (when-some [r (:radius nstyle)] (CornerRadius. (double r))))
+    (set-dp! "Padding" (insets->thickness (:padding nstyle)))
+    (set-dp! "Opacity" (when-some [o (:opacity nstyle)] (double o)))
+    (set-dp! "Width" (when-some [v (:width nstyle)] (double v)))
+    (set-dp! "Height" (when-some [v (:height nstyle)] (double v)))
+    (set-dp! "MinWidth" (when-some [v (:min-width nstyle)] (double v)))
+    (set-dp! "MaxWidth" (when-some [v (:max-width nstyle)] (double v)))
+    (set-dp! "MinHeight" (when-some [v (:min-height nstyle)] (double v)))
+    (set-dp! "MaxHeight" (when-some [v (:max-height nstyle)] (double v)))))
+
+(defn apply-style!
+  "Apply a canonical :style map (nil clears everything). `text?` = also apply the text
+  part (text-bearing elements only; containers do not inherit fonts in cloview).
+  :host-style may be a (fn [element]) run last."
+  [el style-map text?]
+  (let [ns (style/normalize style-map)]
+    (apply-box-style! el ns)
+    (when text? (apply-text-style! el ns))
+    (when (fn? (:host-style ns)) ((:host-style ns) el))
+    el))
+
+(defn set-test-id! [el id]
+  (if (some? id)
+    (AutomationProperties/SetAutomationId ^DependencyObject el (str id))
+    (.ClearValue ^DependencyObject el AutomationProperties/AutomationIdProperty))
+  el)
+
+(defn type-name [x] (when x (.Name (.GetType ^Object x))))

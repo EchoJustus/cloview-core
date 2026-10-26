@@ -1,0 +1,5 @@
+;; ClojureCLR view of modules/fx (cljr reads deps-clr.edn before deps.edn).
+{:paths ["src"]
+ :deps {cloview/core {:local/root "../core"}}
+ :aliases {:test {:extra-paths ["test" "../../verify/src"]
+                  :main-opts ["-m" "cloview.verify.test-runner" "fx"]}}}

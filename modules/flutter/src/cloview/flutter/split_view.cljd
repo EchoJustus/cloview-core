@@ -1,0 +1,38 @@
+;; SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
+(ns cloview.flutter.split-view
+  "Two-pane :ui/split-view with a draggable divider, built from plain Flutter
+  composition (LayoutBuilder + GestureDetector). No third-party package: maintenance of
+  multi_split_view could not be confirmed, and this is ~50 lines.
+
+  The ratio is controlled: dragging dispatches (conj on-resize new-ratio) and the next
+  build renders the db's ratio. Ratios are clamped to [0.1, 0.9]."
+  (:require [cloview.core.tree :as t]
+            [cloview.flutter.material :as mat]))
+
+(def min-ratio 0.1)
+(def max-ratio 0.9)
+
+(defn clamp-ratio [r]
+  (max min-ratio (min max-ratio (double r))))
+
+(defn split-view-widget
+  "`panes` are the two child widgets."
+  [{:keys [orientation ratio on-resize]} panes dispatch!]
+  (let [vertical? (= orientation :vertical)
+        ratio (clamp-ratio (or ratio 0.5))
+        pane-a (nth panes 0)
+        pane-b (nth panes 1)]
+    (mat/layout-builder
+     (fn [max-w max-h]
+       (let [extent (double (or (if vertical? max-h max-w) 600.0))
+             a-size (* extent ratio)
+             handle (mat/drag-handle
+                     vertical?
+                     (fn [delta]
+                       (when on-resize
+                         (t/emit! dispatch! on-resize :ratio
+                                  (clamp-ratio (/ (+ a-size delta) extent))))))
+             a (if vertical? (mat/sized nil a-size pane-a) (mat/sized a-size nil pane-a))]
+         (if vertical?
+           (mat/column {:align :stretch} [a handle (mat/expanded 1 pane-b)])
+           (mat/row {:align :stretch} [a handle (mat/expanded 1 pane-b)])))))))

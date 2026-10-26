@@ -1,0 +1,124 @@
+;; SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
+(ns cloview.wpf.gif
+  "Animated GIF playback for :ui/image on WPF.
+
+  WPF's Image control shows only the first frame of a GIF (System.Windows.Controls.Image
+  does not animate). This namespace decodes the frames once with GifBitmapDecoder,
+  composes them onto the logical screen honouring each frame's offset and disposal
+  method (none / keep, restore-to-background, restore-to-previous), freezes the composed
+  bitmaps and swaps them into the Image with a DispatcherTimer using the per-frame
+  delays. Composition uses WPF drawing only (DrawingVisual + clip geometry), no
+  per-pixel loops.
+
+  Ownership: `start!` returns a player map stored in the element's state; `stop!`
+  stops the timer and drops the frames. cloview.wpf.hostops calls stop! when the :src
+  changes and when the element is destroyed, so navigating away releases the timer.
+
+  Limits: playback loops forever (the NETSCAPE loop count is not read); GIFs whose
+  composed frames would exceed `max-pixels` play as a still first frame."
+  (:import [System.Windows Rect]
+           [System.Windows.Media DrawingVisual RectangleGeometry CombinedGeometry
+            GeometryCombineMode PixelFormats]
+           [System.Windows.Media.Imaging GifBitmapDecoder BitmapCreateOptions BitmapCacheOption
+            BitmapFrame BitmapMetadata RenderTargetBitmap]
+           [System.Windows.Threading DispatcherTimer]))
+
+(def max-pixels
+  "Upper bound on width x height x frames that is pre-composed (~256 MB of Pbgra32)."
+  (* 64 1024 1024))
+
+(defn gif-path?
+  "True when `path` names a .gif file."
+  [path]
+  (boolean (re-find #"(?i)\.gif$" (str path))))
+
+(defn- query
+  "Metadata value at `q` (e.g. \"/grctlext/Delay\"), or `default` when absent."
+  [^BitmapMetadata md ^String q default]
+  (try
+    (if (and md (.ContainsQuery md q))
+      (let [v (.GetQuery md q)] (if (nil? v) default v))
+      default)
+    (catch System.Exception _ default)))
+
+(defn- frame-info [^BitmapFrame f]
+  (let [md (.Metadata f)
+        cs (long (query md "/grctlext/Delay" 10))]
+    {:left (double (query md "/imgdesc/Left" 0))
+     :top (double (query md "/imgdesc/Top" 0))
+     :width (double (.PixelWidth f))
+     :height (double (.PixelHeight f))
+     :disposal (long (query md "/grctlext/Disposal" 0))
+     ;; browsers treat 0/1 centiseconds as 100 ms
+     :delay-ms (if (<= cs 1) 100 (* 10 cs))}))
+
+(defn- compose
+  "Render `base` ({:bitmap b :exclude rect-or-nil}, or nil) and `frame` at `rect` onto a
+  w x h canvas; returns a frozen bitmap."
+  [w h base ^BitmapFrame frame ^Rect rect]
+  (let [dv (DrawingVisual.)
+        dc (.RenderOpen dv)
+        full (Rect. 0.0 0.0 (double w) (double h))]
+    (when-some [{:keys [bitmap exclude]} base]
+      (if exclude
+        (do (.PushClip dc (CombinedGeometry. GeometryCombineMode/Exclude
+                                             (RectangleGeometry. full)
+                                             (RectangleGeometry. ^Rect exclude)))
+            (.DrawImage dc bitmap full)
+            (.Pop dc))
+        (.DrawImage dc bitmap full)))
+    (.DrawImage dc frame rect)
+    (.Close dc)
+    (let [rtb (RenderTargetBitmap. (int w) (int h) 96.0 96.0 PixelFormats/Pbgra32)]
+      (.Render rtb dv)
+      (.Freeze rtb)
+      rtb)))
+
+(defn decode
+  "{:frames [frozen composed bitmaps] :delays [ms]} for the GIF at `uri`, or nil when
+  it has a single frame (or is too large to pre-compose)."
+  [^System.Uri uri]
+  (let [decoder (GifBitmapDecoder. uri BitmapCreateOptions/PreservePixelFormat BitmapCacheOption/OnLoad)
+        frames (vec (.Frames decoder))
+        infos (mapv frame-info frames)
+        md (.Metadata decoder)
+        w (long (query md "/logscrdesc/Width" (long (:width (first infos) 0))))
+        h (long (query md "/logscrdesc/Height" (long (:height (first infos) 0))))]
+    (when (and (> (count frames) 1) (pos? w) (pos? h)
+               (<= (* w h (count frames)) max-pixels))
+      (loop [i 0, base nil, out []]
+        (if (= i (count frames))
+          {:frames out :delays (mapv :delay-ms infos)}
+          (let [{:keys [left top width height disposal]} (nth infos i)
+                rect (Rect. left top width height)
+                composed (compose w h base (nth frames i) rect)
+                d (long disposal)
+                next-base (cond
+                            (== d 2) {:bitmap composed :exclude rect}  ; restore to background
+                            (== d 3) base                              ; restore to previous
+                            :else {:bitmap composed})]                 ; 0/1: keep
+            (recur (inc i) next-base (conj out composed))))))))
+
+(defn stop!
+  "Stop a player (nil-safe)."
+  [player]
+  (when-some [^DispatcherTimer t (:timer player)]
+    (.Stop t))
+  nil)
+
+(defn start!
+  "Animate `image` (a System.Windows.Controls.Image) with the decoded GIF `anim`
+  ({:frames :delays}); returns the player. The first frame is shown immediately."
+  [^System.Windows.Controls.Image image {:keys [frames delays] :as anim}]
+  (let [n (count frames)
+        index (atom 0)
+        timer (DispatcherTimer.)]
+    (.set_Source image (first frames))
+    (.set_Interval timer (System.TimeSpan/FromMilliseconds (double (first delays))))
+    (.add_Tick timer (gen-delegate System.EventHandler [_ _]
+                       (let [i (mod (inc @index) n)]
+                         (reset! index i)
+                         (.set_Source image (nth frames i))
+                         (.set_Interval timer (System.TimeSpan/FromMilliseconds (double (nth delays i)))))))
+    (.Start timer)
+    {:timer timer :frames n :index index}))

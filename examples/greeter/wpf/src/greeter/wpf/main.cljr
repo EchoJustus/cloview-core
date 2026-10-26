@@ -1,0 +1,206 @@
+;; SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
+(ns greeter.wpf.main
+  "Greeter on WPF (ClojureCLR). Entry points called by CloViewHost.exe (Program.cs):
+
+    start!               normal app (Program.cs passes the System.Windows.Application)
+    run-headless-smoke!  --headless-smoke : off-screen WPF checks -> JSON report, exit code
+    run-tests!           --run-tests      : the portable unit tests on the CLR -> JSON, exit code"
+  (:require [cloview.wpf.app :as app]
+            [cloview.wpf.dispatch :as dispatch]
+            [cloview.wpf.interop :as wpf]
+            [cloview.core.reconcile :as r]
+            [cloview.core.store :as st]
+            [cloview.verify.report :as report]
+            [cloview.verify.test-runner :as test-runner]
+            [greeter.core :as g]
+            [greeter.kitchen-sink :as ks]))
+
+(import '[System.Windows Window UIElement]
+        '[System.Windows.Controls TextBox TextBlock CheckBox ComboBox TabControl Grid]
+        '[System.Windows.Controls.Primitives ToggleButton]
+        '[System.Windows.Shapes Rectangle])
+
+;; ---------------------------------------------------------------------------
+;; App
+
+(defn start!
+  "Called by Program.cs before Application.Run()."
+  [_application]
+  (g/register!)
+  (app/start! {:store g/store
+               :view g/root
+               :title "cloview greeter — WPF"
+               :width 420
+               :height 300
+               :app-id "greeter"}))
+
+;; ---------------------------------------------------------------------------
+;; Headless smoke
+
+(defn- by-id [rctx id] (r/handle-by-test-id rctx id))
+
+(defn- show! [rep ^Window w where]
+  (try
+    (.Show w)
+    (dispatch/pump!)
+    true
+    (catch System.Exception e
+      (report/error! rep (str where "/show-window") e)
+      false)))
+
+(defn- greeter-checks! [rep]
+  (let [events (atom [])
+        store (st/create-store {:db g/initial-db
+                                :on-event (fn [e _] (swap! events conj e))})
+        {:keys [window rctx counter unmount!]} (app/mount! {:store store
+                                                            :view g/root
+                                                            :title "greeter smoke"
+                                                            :width 420 :height 300
+                                                            :offscreen? true})
+        shown? (show! rep window "greeter")
+        ^TextBox tb (by-id rctx "name")
+        ^TextBlock title (by-id rctx "title")]
+    (report/check! rep "greeter/window-shown-offscreen" true shown? {:critical? false})
+    (report/check! rep "greeter/textbox-found" true (instance? TextBox tb))
+    (report/check! rep "greeter/title-text" "Greeter" (some-> title .Text))
+    (report/check! rep "greeter/title-font-size" 20.0 (some-> title .FontSize))
+    (report/check! rep "greeter/title-bold" 700 (some-> title .FontWeight .ToOpenTypeWeight))
+    (report/check! rep "greeter/title-color" "#FF3366CC" (some-> title .Foreground str) {:critical? false})
+    ;; simulated typing: the user edits the TextBox, the store follows, nothing is rewritten
+    (.set_Text tb "A")
+    (.set_CaretIndex tb 1)
+    (dispatch/pump!)
+    (.set_Text tb "Ad")
+    (.set_CaretIndex tb 2)
+    (dispatch/pump!)
+    (report/check! rep "typing/db-follows-user" "Ad" (:name (st/db store)))
+    (report/check! rep "typing/text-not-rewritten" "Ad" (.Text tb))
+    (report/check! rep "typing/caret-kept" 2 (.CaretIndex tb))
+    ;; the spike's required programmatic events
+    (st/dispatch! store [:app/set-name "Ada"])
+    (dispatch/pump!)
+    (report/check! rep "external/textbox-text" "Ada" (.Text tb))
+    (report/check! rep "external/caret-intact" 2 (.CaretIndex tb)
+                   {:note "caret preserved (clamped), not reset to 0 by the programmatic Text write"})
+    (st/dispatch! store [:app/greet])
+    (dispatch/pump!)
+    (report/check! rep "greet/greeting-text" "Hello, Ada!" (some-> ^TextBlock (by-id rctx "greeting") .Text))
+    (report/check! rep "events/no-echo"
+                   [[:app/set-name "A"] [:app/set-name "Ad"] [:app/set-name "Ada"] [:app/greet]]
+                   @events
+                   {:note "the TextChanged raised by the programmatic write was swallowed"})
+    ;; coalescing: many db changes, one dispatcher turn => one render pass
+    (let [before (r/passes rctx)]
+      (dotimes [i 5] (st/dispatch! store [:app/set-name (str "Ada" i)]))
+      (dispatch/pump!)
+      (report/check! rep "render/coalesced-into-one-pass" 1 (- (r/passes rctx) before) {:critical? false}))
+    (report/check! rep "render/textbox-identity-stable" true (identical? tb (by-id rctx "name"))
+                   {:critical? false})
+    (swap! rep assoc :host_ops_greeter @counter)
+    (unmount!)
+    (.Close ^Window window)))
+
+(def ^:private native-host
+  {:create (fn []
+             (doto (Rectangle.)
+               (.set_Width 20.0)
+               (.set_Height 20.0)
+               (.set_Fill (wpf/brush "#3366cc"))))
+   :update (fn [^Rectangle rect props] (.set_Width rect (double (+ 20 (:n props 0)))))
+   :dispose (fn [_] nil)})
+
+(defn- keyed-handle [rctx k]
+  (some (fn [i] (when (= k (:key i)) (:handle i))) (r/instance-seq rctx)))
+
+(defn- kitchen-sink! [rep]
+  (let [events (atom [])
+        store (st/create-store {:db ks/initial-db :on-event (fn [e _] (swap! events conj e))})
+        {:keys [window rctx counter unmount!]} (app/mount! {:store store
+                                                            :view #(ks/view % native-host)
+                                                            :title "kitchen sink"
+                                                            :width 640 :height 900
+                                                            :offscreen? true})
+        _ (show! rep window "kitchen-sink")
+        coverage (mapv (fn [[tag id]]
+                         (let [h (by-id rctx id)]
+                           {:tag tag :ok (some? h) :host (wpf/type-name h)}))
+                       (sort-by (comp str key) ks/tag->test-id))
+        item-a (keyed-handle rctx :a)]
+    (swap! rep assoc :tag_coverage coverage)
+    (report/check! rep "kitchen-sink/all-tags-mounted" [] (mapv :tag (remove :ok coverage)) {:critical? false})
+    (doseq [e ks/patch-events]
+      (try
+        (st/dispatch! store e)
+        (dispatch/pump!)
+        (catch System.Exception ex (report/error! rep (str "patch " (pr-str e)) ex)))
+      (when (= e [:ks/open-modal])
+        (report/check! rep "kitchen-sink/modal-overlay-visible" "Visible"
+                       (some-> (by-id rctx "ks-modal") wpf/state deref :overlay .Visibility str)
+                       {:critical? false})))
+    (report/check! rep "kitchen-sink/modal-overlay-hidden-after-close" "Collapsed"
+                   (some-> (by-id rctx "ks-modal") wpf/state deref :overlay .Visibility str)
+                   {:critical? false})
+    (report/check! rep "kitchen-sink/input-patched" "typed" (some-> ^TextBox (by-id rctx "ks-input") .Text)
+                   {:critical? false})
+    (report/check! rep "kitchen-sink/checkbox-patched" true
+                   (some-> ^CheckBox (by-id rctx "ks-checkbox") .IsChecked boolean) {:critical? false})
+    (report/check! rep "kitchen-sink/switch-patched" false
+                   (some-> ^CheckBox (by-id rctx "ks-switch") .IsChecked boolean) {:critical? false})
+    (report/check! rep "kitchen-sink/select-patched" 0
+                   (some-> ^ComboBox (by-id rctx "ks-select") .SelectedIndex) {:critical? false})
+    (report/check! rep "kitchen-sink/tab-patched" 1
+                   (some-> ^TabControl (by-id rctx "ks-tabs") .SelectedIndex) {:critical? false})
+    (report/check! rep "kitchen-sink/split-ratio-patched" 0.6
+                   (some-> (by-id rctx "ks-split") wpf/state deref :inner
+                           (#(.Value (.Width (.get_Item (.ColumnDefinitions ^Grid %) 0)))))
+                   {:critical? false})
+    (report/check! rep "kitchen-sink/native-props-updated" 21.0
+                   (some-> ^Rectangle (by-id rctx "ks-native") .Width) {:critical? false})
+    (report/check! rep "kitchen-sink/keyed-reorder-reuses-element" true
+                   (and (some? item-a) (identical? item-a (keyed-handle rctx :a))) {:critical? false})
+    (report/check! rep "kitchen-sink/keyed-reorder-moved-row" 4
+                   (some-> item-a (#(Grid/GetRow ^UIElement %))) {:critical? false})
+    (report/check! rep "kitchen-sink/toggle-patched" [false true]
+                   [(some-> ^ToggleButton (by-id rctx "ks-toggle") .IsChecked boolean)
+                    (some-> ^ToggleButton (by-id rctx "ks-toggle-y") .IsChecked boolean)]
+                   {:critical? false})
+    (report/check! rep "kitchen-sink/no-echo" ks/patch-events @events
+                   {:critical? false
+                    :note "programmatic writes never re-dispatch (reconciler re-entrancy guard)"})
+    (swap! rep assoc :host_ops_kitchen_sink @counter)
+    (unmount!)
+    (.Close ^Window window)))
+
+(defn run-headless-smoke!
+  "Off-screen WPF smoke. Writes JSON to `out-path`; returns 0 when every critical
+  Greeter check passed, 1 otherwise."
+  [out-path]
+  (g/register!)
+  (ks/register!)
+  (let [started (report/now-ms)
+        rep (report/new-report "clr-wpf-smoke" "clr/wpf")]
+    (swap! rep assoc :env (report/host-info))
+    (try
+      (greeter-checks! rep)
+      (catch System.Exception e
+        (report/error! rep "greeter" e)
+        (println (str e))))
+    (try
+      (kitchen-sink! rep)
+      (catch System.Exception e
+        (swap! rep update :checks conj {:id "kitchen-sink/run" :ok false :critical false :actual (str e)})
+        (println (str e))))
+    (let [final (report/finish rep started (report/now-ms))]
+      (report/write-json! out-path final)
+      (println (str "clr wpf smoke: " (if (:ok final) "OK" "FAILED")
+                    " (" (:checks_passed final) "/" (:checks_total final) " checks) -> " out-path))
+      (if (:ok final) 0 1))))
+
+;; ---------------------------------------------------------------------------
+;; Unit tests on the CLR
+
+(defn run-tests!
+  "Run the portable unit tests (core, fx, bridge, licensing; MockHostOps reconciler included) on ClojureCLR.
+  Returns the exit code."
+  [out-path]
+  (test-runner/run-suites! test-runner/portable-suites out-path))

@@ -1,0 +1,41 @@
+;; SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
+(ns cloview.flutter.app
+  "Flutter host: one reactive root.
+
+    (defn main []
+      (g/register!)
+      (app/start! {:store g/store :view g/root :title \"Greeter\"}))
+
+  `root-widget` holds the only :watch on the store's db atom (cljd.flutter's Subscribable
+  extends atoms via add-watch, and :watch rebuilds only when the value changes by =).
+  Every rebuild re-interprets the canonical view into fresh widgets
+  (cloview.flutter.adapters) and Flutter's Element tree reconciles them.
+
+  Dispatch stays synchronous on the UI isolate (the store's default executor), so a
+  keystroke's db change is applied before the next frame.
+
+  Performance escape hatches for large screens (not needed so far; the fitness app in
+  cloview-examples renders fine without them): split the view into :ui/native islands
+  with their own :watch, or memoize subtrees by db identity."
+  (:require [cljd.flutter :as f]
+            [cloview.core.store :as st]
+            [cloview.flutter.adapters :as adapters]
+            [cloview.flutter.material :as mat]))
+
+(defn root-widget
+  "Reactive root: re-renders `view` (db -> hiccup) whenever the store's db changes."
+  [store view]
+  (let [ctx {:dispatch! (fn [event] (st/dispatch! store event))}]
+    (f/widget
+     :watch [db (st/app-db store)]
+     (adapters/render-root (view db) ctx))))
+
+(defn app-widget
+  "MaterialApp > Scaffold > SafeArea > reactive root (also what widget tests pump)."
+  [{:keys [store view title]}]
+  (mat/material-app (or title "cloview") (root-widget store view)))
+
+(defn start!
+  "Run the app (hot-reload friendly)."
+  [opts]
+  (f/run (app-widget opts)))

@@ -1,0 +1,53 @@
+;; SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
+(ns cloview.flutter.style
+  "Canonical :style -> Flutter: TextStyle for text, and a box wrapper applying
+  padding, background/border/radius (BoxDecoration), opacity, sizes and margin.
+
+  Wrapping order (inner to outer): padding -> decoration -> size constraints ->
+  opacity -> margin, which matches the CSS box model the JavaFX and WPF adapters use."
+  (:require [cloview.core.color :as color]
+            [cloview.core.style :as style]
+            [cloview.flutter.material :as mat]))
+
+(defn normalize [props] (style/normalize (:style props)))
+
+(defn text-style
+  "Flutter TextStyle (or nil) from a normalized style."
+  [nstyle]
+  (let [{c :color fs :font-size fw :font-weight ff :font-family it :italic?} nstyle]
+    (mat/text-style (cond-> {}
+                      c (assoc :color (color/argb-int c))
+                      fs (assoc :font-size fs)
+                      fw (assoc :font-weight fw)
+                      ff (assoc :font-family ff)
+                      it (assoc :italic? true)))))
+
+(defn text-align [nstyle] (mat/text-align (:text-align nstyle)))
+
+(defn- decoration [nstyle]
+  (let [{bg :background bw :border-width bc :border-color r :radius} nstyle]
+    (when (or bg bw r)
+      (mat/box-decoration (cond-> {}
+                            bg (assoc :background (color/argb-int bg))
+                            bw (assoc :border-width bw)
+                            bc (assoc :border-color (color/argb-int bc))
+                            r (assoc :radius r))))))
+
+(defn wrap-box
+  "Apply the box part of a normalized style around `child`. `skip` is a set of keys the
+  caller already handled (e.g. #{:padding} when the widget has native padding)."
+  ([nstyle child] (wrap-box nstyle child #{}))
+  ([nstyle child skip]
+   (let [{:keys [padding margin opacity width height min-width max-width min-height max-height]} nstyle
+         deco (decoration nstyle)
+         host (:host-style nstyle)]
+     (cond-> child
+       (and padding (not (contains? skip :padding))) (->> (mat/padding (mat/insets padding)))
+       deco (->> (mat/decorated deco))
+       (or min-width max-width min-height max-height)
+       (->> (mat/constrained {:min-width min-width :max-width max-width
+                              :min-height min-height :max-height max-height}))
+       (or width height) (->> (mat/sized width height))
+       (some? opacity) (->> (mat/opacity opacity))
+       margin (->> (mat/padding (mat/insets margin)))
+       (fn? host) host))))

@@ -1,0 +1,106 @@
+;; SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
+(ns cloview.wpf.app
+  "WPF host for cloview apps on ClojureCLR.
+
+    ;; from the C# host (CloViewHost), on the [STAThread]:
+    (app/start! {:store store :view root :title \"Greeter\" :app-id \"greeter\"})
+
+  Window layout: Window > Grid { content host (Border) , overlay layer (Grid) }.
+  The reconciler (cloview.core.reconcile + cloview.wpf.hostops) owns the content; the
+  overlay layer hosts :ui/modal overlays above it.
+
+  Rendering: a watch on the store's db atom schedules ONE coalesced render per
+  dispatcher turn (cloview.wpf.dispatch/coalescer); `flush!` renders synchronously."
+  (:require [clojure.string :as str]
+            [cloview.core.reconcile :as r]
+            [cloview.core.store :as st]
+            [cloview.wpf.dispatch :as dispatch]
+            [cloview.wpf.hostops :as hostops]
+            [cloview.wpf.interop :as wpf]
+            [cloview.fx.file :as file]
+            [cloview.fx.http :as http]
+            [cloview.fx.lan-sync :as lan-sync]
+            [cloview.fx.storage :as storage]
+            [cloview.fx.timer :as timer]))
+
+(import '[System.Windows Window WindowStartupLocation SizeToContent]
+        '[System.Windows.Controls Border Grid])
+
+(defn- pick-files! [{:keys [title extensions multiple? on-picked on-cancel]} {:keys [dispatch!]}]
+  (let [dlg (Microsoft.Win32.OpenFileDialog.)]
+    (.set_Title dlg (str (or title "Open")))
+    (.set_Multiselect dlg (boolean multiple?))
+    (when (seq extensions)
+      (.set_Filter dlg (str "Supported files|" (str/join ";" (map #(str "*." %) extensions))
+                            "|All files|*.*")))
+    (if (= true (.ShowDialog dlg))
+      (when on-picked (dispatch! (conj on-picked (vec (seq (.FileNames dlg))))))
+      (when on-cancel (dispatch! on-cancel)))))
+
+(defn install-effects!
+  "Install every host effect for the CLR (incl. the WPF :file/pick)."
+  [{:keys [app-id] :or {app-id "cloview"}}]
+  (timer/install!)
+  (http/install!)
+  (storage/install! {:app-id app-id})
+  (file/install! {:app-id app-id})
+  (lan-sync/install!)
+  (st/reg-fx :file/pick pick-files!)
+  :installed)
+
+(defn make-window
+  "A plain Window; :offscreen? places it far outside the visible desktop (smoke tests)."
+  [{:keys [title width height offscreen?]}]
+  (let [w (Window.)]
+    (.set_Title w (str (or title "cloview")))
+    (.set_Width w (double (or width 480)))
+    (.set_Height w (double (or height 360)))
+    (when offscreen?
+      (.set_WindowStartupLocation w WindowStartupLocation/Manual)
+      (.set_Left w -32000.0)
+      (.set_Top w -32000.0)
+      (.set_ShowInTaskbar w false)
+      (.set_ShowActivated w false))
+    w))
+
+(defn mount!
+  "Mount `view` (db -> hiccup) for `store` into `window` (created when absent).
+  Returns {:window :rctx :flush! :unmount! :counter} — :counter is an atom with
+  HostOps call counts (create/patch/children/slot/destroy)."
+  [{:keys [store view window] :as opts}]
+  (let [window (or window (make-window opts))
+        d (dispatch/current-dispatcher)
+        root (Grid.)
+        content-host (Border.)
+        overlay-layer (Grid.)
+        counter (atom {})
+        ops (r/counting-ops (hostops/wpf-host-ops {:overlay-layer overlay-layer}) counter)
+        rctx (r/create-reconciler ops {:dispatch! (fn [e] (st/dispatch! store e))})
+        render! (fn []
+                  (let [h (r/render! rctx (view (st/db store)))]
+                    (when-not (identical? h (.Child content-host))
+                      (.set_Child content-host h))))
+        schedule! (dispatch/coalescer d render!)
+        watch-key (keyword "cloview.wpf.app" (str "render-" (System.Guid/NewGuid)))]
+    (.Add (.Children root) content-host)
+    (.Add (.Children root) overlay-layer)
+    (.set_Content ^Window window root)
+    (st/set-executor! store (dispatch/executor d))
+    (render!)
+    (add-watch (st/app-db store) watch-key (fn [_ _ _ _] (schedule!)))
+    {:window window
+     :rctx rctx
+     :counter counter
+     :flush! render!
+     :unmount! (fn []
+                 (remove-watch (st/app-db store) watch-key)
+                 (r/unmount! rctx)
+                 (.set_Child content-host nil))}))
+
+(defn start!
+  "Install effects, mount, show the window. Returns the mount map."
+  [{:keys [app-id install-effects?] :or {install-effects? true} :as opts}]
+  (when install-effects? (install-effects! {:app-id (or app-id "cloview")}))
+  (let [m (mount! opts)]
+    (.Show ^Window (:window m))
+    m))

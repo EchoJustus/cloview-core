@@ -1,0 +1,17 @@
+{
+  "manifest_version": 1,
+  "id": "r",
+  "name": "R plots",
+  "protocol": "cloview-bridge/1",
+  "command": {
+    "windows": ["${appDir}/R/bin/Rscript.exe", "--vanilla", "${appDir}/backend/r/backend.R"],
+    "default": ["Rscript", "--vanilla", "${appDir}/backend/r/backend.R"]
+  },
+  "cwd": "${appDir}/backend/r",
+  "env": {"CLOVIEW_R_OUT": "${tempDir}/cloview-r"},
+  "start": "on-demand",
+  "startup_timeout_ms": 30000,
+  "request_timeout_ms": 120000,
+  "shutdown_timeout_ms": 3000,
+  "restart": {"policy": "on-crash", "max_restarts": 3, "window_ms": 60000}
+}

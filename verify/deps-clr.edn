@@ -1,0 +1,2 @@
+;; ClojureCLR view of the verification helpers.
+{:paths ["src"]}

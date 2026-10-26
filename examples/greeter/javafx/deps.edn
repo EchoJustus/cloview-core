@@ -1,0 +1,15 @@
+;; Greeter on JavaFX.
+;;   clj -M:run        ; interactive window
+;;   clj -M:smoke      ; off-screen smoke -> ../../../verify/out/03-jvm-cljfx-smoke.json
+;; (bb run:javafx / bb smoke:javafx do the same from the repo root.)
+{:paths ["src"]
+ :deps {org.clojure/clojure {:mvn/version "1.12.6"}
+        cloview/javafx {:local/root "../../../modules/javafx"}
+        greeter/shared {:local/root "../shared"}}
+ :aliases {:run {:main-opts ["-m" "greeter.javafx.main"]}
+           :smoke {:extra-deps {cloview/verify {:local/root "../../../verify"}}
+                   :main-opts ["-m" "greeter.javafx.smoke" "../../../verify/out/03-jvm-cljfx-smoke.json"]}
+           :cljfx-git {:override-deps
+                       {cljfx/cljfx {:git/url "https://github.com/cljfx/cljfx"
+                                     :git/tag "1.10.363"
+                                     :git/sha "6bee510722fbb12d4f7ac447d413a77894bd7e33"}}}}}

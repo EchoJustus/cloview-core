@@ -1,0 +1,3 @@
+;; The Greeter's shared .cljc code (events, subscriptions, view, kitchen sink).
+{:paths ["src"]
+ :deps {cloview/core {:local/root "../../../modules/core"}}}

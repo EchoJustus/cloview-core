@@ -1,0 +1,8 @@
+;; cloview bridge (opt-in, Mode 2): a cloview GUI talking to a backend process written in
+;; Java, C#, Dart, ... over JSON-RPC 2.0 on stdio. See docs/POLYGLOT_BACKEND_ARCHITECTURE.md.
+;; Apps that keep their logic in .cljc (Mode 1, the default) do not depend on it.
+{:paths ["src"]
+ :deps {cloview/core {:local/root "../core"}
+        cloview/fx {:local/root "../fx"}}
+ :aliases {:test {:extra-paths ["test" "../../verify/src"]
+                  :main-opts ["-m" "cloview.verify.test-runner" "bridge"]}}}

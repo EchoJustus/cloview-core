@@ -1,0 +1,53 @@
+;; cloview-core — root deps.edn for repo-wide JVM tasks (run from the repo root).
+;;
+;;   clj -M:test                      ; JVM unit tests: core, fx, bridge, licensing (+ key tool), starter, cljfx snapshots
+;;   clj -M:test core                 ; one suite (core fx bridge licensing licensing-tool starter javafx) or namespaces
+;;   clj -M:test --out verify/out/02-jvm-unit-tests.json
+;;   clj -M:static-check              ; read every .clj/.cljc/.cljd/.cljr + check cross-ns calls
+;;   clj -M:smoke-javafx [out.json]    ; off-screen JavaFX smoke of the Greeter + kitchen sink
+;;   clj -M:run-javafx                 ; Greeter window (JavaFX)
+;;   clj -M:init ../my-app             ; new app (same as bb init; see README "Start a project")
+;;   clj -M:license keygen --kid 2026-1 ; seller's licence key tool (docs/LICENSING.md)
+;;   add :cljfx-git (e.g. -M:smoke-javafx:cljfx-git) if Clojars cannot serve cljfx 1.10.363
+;;
+;; The unit-test alias puts module sources on the path directly (no cljfx/JavaFX): the
+;; cljfx adapter (cloview.javafx.cljfx) is a pure data translation and never loads JavaFX.
+;; Library consumers depend on modules/* instead (see README.md, "Using the modules without bb init").
+;; The fitness app and its acceptance benchmark live in cloview-examples (MIT), which has
+;; its own deps.edn and reaches these modules through a sibling checkout.
+{:paths []
+ :deps {org.clojure/clojure {:mvn/version "1.12.6"}}
+ :aliases
+ {:test {:extra-paths ["modules/core/src" "modules/core/test"
+                       "modules/fx/src" "modules/fx/test"
+                       "modules/bridge/src" "modules/bridge/test"
+                       "modules/licensing/src" "modules/licensing/test" "modules/licensing/tool"
+                       "starter/src" "starter/test"
+                       "modules/javafx/src" "modules/javafx/test"
+                       "verify/src"]
+         :main-opts ["-m" "cloview.verify.test-runner"]}
+
+  :static-check {:main-opts ["verify/static_check.clj"]}
+
+  :smoke-javafx {:extra-paths ["verify/src" "examples/greeter/javafx/src"]
+                 :extra-deps {cloview/javafx {:local/root "modules/javafx"}
+                              greeter/shared {:local/root "examples/greeter/shared"}}
+                 :main-opts ["-m" "greeter.javafx.smoke"]}
+
+  :run-javafx {:extra-paths ["examples/greeter/javafx/src"]
+               :extra-deps {cloview/javafx {:local/root "modules/javafx"}
+                            greeter/shared {:local/root "examples/greeter/shared"}}
+               :main-opts ["-m" "greeter.javafx.main"]}
+
+  ;; the project initializer without babashka: clojure -M:init ../my-app --target javafx
+  :init {:extra-paths ["starter/src"]
+         :main-opts ["-m" "cloview.starter"]}
+
+  ;; seller's side of modules/licensing: keygen / issue / inspect / device-code
+  :license {:extra-paths ["modules/core/src" "modules/fx/src" "modules/licensing/src" "modules/licensing/tool"]
+            :main-opts ["-m" "cloview.licensing.issue"]}
+
+  :cljfx-git {:override-deps
+              {cljfx/cljfx {:git/url "https://github.com/cljfx/cljfx"
+                            :git/tag "1.10.363"
+                            :git/sha "6bee510722fbb12d4f7ac447d413a77894bd7e33"}}}}}

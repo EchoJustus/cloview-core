@@ -1,0 +1,10 @@
+;; cloview licensing (opt-in): offline ES256 licence keys, device binding, metered trials
+;; and gated events for direct-distribution apps. See docs/LICENSING.md.
+;; The seller's key tool (keygen / issue / inspect) lives in tool/ and never ships in an app.
+{:paths ["src"]
+ :deps {cloview/core {:local/root "../core"}
+        cloview/fx {:local/root "../fx"}}
+ :aliases {:test {:extra-paths ["test" "tool" "../../verify/src"]
+                  :main-opts ["-m" "cloview.verify.test-runner" "licensing" "licensing-tool"]}
+           :issue {:extra-paths ["tool"]
+                   :main-opts ["-m" "cloview.licensing.issue"]}}}
