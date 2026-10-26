@@ -4,11 +4,19 @@
 
     python3 -I ops/tools/ci_summary.py verify/out            # every *.json in the folder
     python3 -I ops/tools/ci_summary.py verify/out >> "$GITHUB_STEP_SUMMARY"
+    python3 -I ops/tools/ci_summary.py --require-ok verify/out >> "$GITHUB_STEP_SUMMARY"
 
 Understands the files the test runner, the smokes, business-oracle runs (such as the
 fitness app's in cloview-examples) and the Windows harnesses write (unit-test totals,
-smoke checks, oracle summaries, 00-summary.json). Other JSON files are listed by name only. Standard library only; exit code 0 unless the folder
-is missing, so a summary is written even when tests failed.
+smoke checks, oracle summaries, 00-summary.json). Other JSON files are listed by name
+only. Standard library only.
+
+The summary is written as UTF-8, whatever encoding Python would pick for stdout (cp1252
+when it is redirected on Windows). Exit code 0 unless the folder is missing (2), so a
+summary is written even when tests failed. With --require-ok (the verdict CI asks for),
+exit code 1 unless the folder holds a Windows harness summary whose steps are all "ok"
+and whose run was not aborted: in CI a skipped step fails too, while the harness run
+locally keeps reporting skips without failing.
 """
 import json
 import pathlib
@@ -26,11 +34,31 @@ def row(*cells):
     return "| " + " | ".join(str(c) for c in cells) + " |"
 
 
+def step_status(info):
+    return info.get("status", "?") if isinstance(info, dict) else info
+
+
+def not_ok(harness):
+    """Why a harness summary fails --require-ok; empty when every step is ok."""
+    if not harness:
+        return ["no Windows harness summary (00-summary.json)"]
+    _, d = harness
+    problems = [f"{step}: {step_status(info)}" for step, info in d["steps"].items() if step_status(info) != "ok"]
+    if not d["steps"]:
+        problems.append("no steps recorded")
+    if d.get("aborted"):
+        problems.append(f"aborted: {d['aborted']}")
+    return problems
+
+
 def main(argv):
-    if len(argv) != 2:
+    args = argv[1:]
+    require_ok = "--require-ok" in args
+    args = [a for a in args if a != "--require-ok"]
+    if len(args) != 1:
         print(__doc__.strip(), file=sys.stderr)
         return 2
-    folder = pathlib.Path(argv[1])
+    folder = pathlib.Path(args[0])
     if not folder.is_dir():
         print(f"no such folder: {folder}", file=sys.stderr)
         return 2
@@ -56,7 +84,7 @@ def main(argv):
         name, d = harness
         lines += [f"### Windows harness ({name})", "", row("Step", "Status"), row("---", "---")]
         for step, info in d["steps"].items():
-            status = info.get("status", "?") if isinstance(info, dict) else info
+            status = step_status(info)
             lines.append(row(step, f"**{status}**" if status != "ok" else status))
         if d.get("missing_files"):
             lines.append("")
@@ -88,9 +116,19 @@ def main(argv):
         lines += ["Other files: " + ", ".join(other), ""]
     if len(lines) == 2:
         lines.append("No result files found.")
+    problems = not_ok(harness) if require_ok else []
+    if require_ok:
+        if lines[-1]:
+            lines.append("")
+        lines.append("**Not passed (--require-ok):** " + "; ".join(problems) if problems
+                     else "**Passed (--require-ok):** every harness step is ok.")
     print("\n".join(lines))
+    if problems:
+        print("ci_summary.py --require-ok: not passed: " + "; ".join(problems), file=sys.stderr)
+        return 1
     return 0
 
 
 if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8")   # redirected on Windows, stdout is cp1252: no arrows
     sys.exit(main(sys.argv))

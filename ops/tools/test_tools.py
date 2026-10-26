@@ -4,6 +4,7 @@
     python3 -I -m unittest discover -s ops/tools -p "test_*.py"
 """
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -83,6 +84,43 @@ class Summary(unittest.TestCase):
             self.assertIn("| 03-clr | **failed** |", out.stdout)
             self.assertIn("broken.json (unreadable", out.stdout)
             self.assertEqual(2, run(SUMMARY, d / "missing").returncode)
+
+    def test_utf8_on_any_stream(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = pathlib.Path(tmp)
+            (d / "unit.json").write_text(json.dumps({"suite": "unit-tests", "totals": {"test": 1, "pass": 0, "fail": 1, "error": 0},
+                                                     "namespaces": [{"ns": "a-test", "test": 1, "pass": 0, "fail": 1, "error": 0}]}))
+            # cp1252, what Python on Windows uses for redirected stdout, cannot encode the arrow of a failing namespace
+            # (without -I, so that PYTHONIOENCODING applies)
+            out = subprocess.run([sys.executable, str(SUMMARY), str(d)], capture_output=True,
+                                 env={**os.environ, "PYTHONIOENCODING": "cp1252"})
+            self.assertEqual(0, out.returncode, out.stderr.decode("utf-8", "replace"))
+            self.assertIn("\N{DOWNWARDS ARROW WITH TIP RIGHTWARDS} a-test", out.stdout.decode("utf-8"))
+
+    def test_require_ok(self):
+        def harness(d, steps, **extra):
+            (d / "00-summary.json").write_text(json.dumps({"suite": "cloview-windows-verification", "steps": steps, **extra}))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            d = pathlib.Path(tmp)
+            self.assertEqual(1, run(SUMMARY, "--require-ok", d).returncode, "no harness summary: not passed")
+            harness(d, {"01-env-check": {"status": "ok"}, "02-jvm-unit-tests": {"status": "ok"}})
+            out = run(SUMMARY, "--require-ok", d)
+            self.assertEqual(0, out.returncode)
+            self.assertIn("**Passed (--require-ok):**", out.stdout)
+            harness(d, {"01-env-check": {"status": "ok"}, "02-jvm-unit-tests": {"status": "failed"},
+                        "06-flutter-compile-and-test": {"status": "skipped"}})
+            out = run(SUMMARY, "--require-ok", d)
+            self.assertEqual(1, out.returncode, "a failed or skipped step fails")
+            self.assertIn("| 02-jvm-unit-tests | **failed** |", out.stdout, "the summary is written all the same")
+            self.assertIn("02-jvm-unit-tests: failed", out.stdout)
+            self.assertIn("06-flutter-compile-and-test: skipped", out.stderr)
+            self.assertEqual(0, run(SUMMARY, d).returncode, "without the option, failures are only shown")
+            harness(d, {"01-env-check": {"status": "ok"}}, aborted="exception: stopped")
+            self.assertEqual(1, run(SUMMARY, "--require-ok", d).returncode, "an aborted run fails")
+            harness(d, {})
+            self.assertEqual(1, run(SUMMARY, "--require-ok", d).returncode, "a summary without steps fails")
+            self.assertEqual(2, run(SUMMARY, "--require-ok").returncode)
 
 
 if __name__ == "__main__":
