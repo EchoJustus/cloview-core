@@ -35,9 +35,11 @@ details.
 ### P1: close the verification loop
 
 0. **CI green** (DEVELOPMENT_WORKFLOW.md §2, §8): `ci.yml` on pushes to `main` and on
-   pull requests, then the
-   `windows-harness.yml` run on a GitHub-hosted Windows runner. Neither has run yet; the
-   repository was not on GitHub when they were written.
+   pull requests, then the `windows-harness.yml` run on a GitHub-hosted Windows runner.
+   Both have run since 2026-10-26: `ci.yml` is green, and `windows-harness.yml` is green
+   with the real-R bridge test and a verdict that fails on any step that is not "ok"
+   (topic `ci/windows-harness-green`). Left: the same verdict in cloview-examples'
+   harness, and the decision on the experimental jobs (DEVELOPMENT_WORKFLOW.md §8).
 1. **The Windows checks the harness does not cover yet** (WINDOWS_VERIFICATION_REPORT.md
    §8.5): `bb init` → `bb test` / `bb test:clr` / `bb dev` for each target, the Dart
    reference backend, and visual checks; R with `jsonlite` is covered since 2026-10-26

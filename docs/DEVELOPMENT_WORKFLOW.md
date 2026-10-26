@@ -42,9 +42,13 @@ its `windows-harness.yml` runs its own Windows harness (steps 01–05) on demand
 by hand, both take a `core_ref` input: the cloview-core branch, tag or commit to test
 against.
 
-None of these workflows has run yet: the repositories are not on GitHub. Making them green is the
-first Stage 3 task for Claude Code (§8). If the hosted Windows runner cannot run a GUI
-step, record why in WINDOWS_VERIFICATION_REPORT.md and move that step to a ticket (§4).
+All four workflows have run on GitHub since 2026-10-26. Both `ci.yml` workflows and
+cloview-examples' `windows-harness.yml` were green that day; cloview-core's
+`windows-harness.yml` is green since the topic `ci/windows-harness-green` gave it the R
+packages of the real-R bridge test and a verdict that fails on any step that is not "ok"
+([topics/ci-windows-harness-green.md](topics/ci-windows-harness-green.md)). If the hosted
+Windows runner cannot run a GUI step, record why in WINDOWS_VERIFICATION_REPORT.md and
+move that step to a ticket (§4).
 
 **Reading CI results without flooding the context:**
 
