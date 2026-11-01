@@ -4,10 +4,13 @@ Some checks cannot run in Claude's Linux sandbox: real WPF, Flutter/ClojureDart,
 Windows Clojure CLI, and Clojars/NuGet downloads. A single PowerShell script runs them
 and packs the results into one zip to upload for review.
 
-What the last run found, and what was fixed, is in
-[`docs/WINDOWS_VERIFICATION_REPORT.md`](docs/WINDOWS_VERIFICATION_REPORT.md). The last run
-(2026-10-25, Stage 2-2b tree, before the repository split) passed every step on all
-three hosts, including the fitness benchmark on Dart (report §8).
+What the run of 2026-10-25 found (Stage 2-2b tree, before the repository split), and
+what was fixed, is in
+[`docs/WINDOWS_VERIFICATION_REPORT.md`](docs/WINDOWS_VERIFICATION_REPORT.md): it passed
+every step on all three hosts, including the fitness benchmark on Dart (report §8).
+Since 2026-10-26 the script also runs on a GitHub-hosted Windows runner, started by
+hand (`.github/workflows/windows-harness.yml`); its first green run there passed all
+six steps, the real-R bridge test included.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\verify\run-windows-checks.ps1

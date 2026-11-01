@@ -30,9 +30,9 @@ read 2026-10-25). The repository ships two workflows:
 
 | Workflow | Runs | What |
 |---|---|---|
-| `.github/workflows/ci.yml`, job `linux` | every push to `main` and every pull request (not for Markdown-only changes) | JVM unit tests with real R, static check, the Greeter's off-screen JavaFX smoke under Xvfb (experimental until its first green run), the tests of the ops tools (result recorder, CI summary) |
-| `ci.yml`, job `clr` | same; experimental (`continue-on-error`) until its first green run | the portable suites (core, fx, bridge, licensing) on ClojureCLR through the `Clojure.Main` tool |
-| `.github/workflows/windows-harness.yml` | by hand: Actions → Run workflow, or `gh workflow run windows-harness.yml` | the full Windows harness (steps 01–06) on `windows-2025`; its artifact is the zip the owner used to upload by hand |
+| `.github/workflows/ci.yml`, job `linux` | every push to `main` and every pull request (not for Markdown-only changes) | JVM unit tests with real R, static check, the Greeter's off-screen JavaFX smoke under Xvfb, the tests of the ops tools (result recorder, CI summary) |
+| `ci.yml`, job `clr` | same | the portable suites (core, fx, bridge, licensing) on ClojureCLR through the `Clojure.Main` tool |
+| `.github/workflows/windows-harness.yml` | by hand only (decision 103): Actions → Run workflow, or `gh workflow run windows-harness.yml` | the full Windows harness (steps 01–06) on `windows-2025`; its artifact is the zip the owner used to upload by hand |
 
 cloview-examples has its own CI, which checks out cloview-core next to it
 (`../cloview-core`): its `ci.yml` runs the fitness unit tests and the 37 oracles, the
@@ -203,12 +203,16 @@ These are estimates from the size of the last result zip, not measurements.
 ## 8. First Stage 3 work
 
 For the owner, first: push both repositories, cloview-core first (cloview-examples' CI
-checks it out), and dispatch both `windows-harness.yml` workflows once.
+checks it out), and dispatch both `windows-harness.yml` workflows once. Done on
+2026-10-26: both repositories are on GitHub, and both harnesses were dispatched that day
+(§2).
 
 For Claude Code, delivering fixes as files (DELIVERY_DESIGN.md):
 
 1. Make both `ci.yml` workflows green. Then confirm the experimental `clr` jobs and either
-   keep them or remove them.
+   keep them or remove them. Done: both have been green since 2026-10-26. cloview-core's
+   `clr` job and JavaFX smoke are required (decision 102); cloview-examples' follow in
+   the topic `ci/first-runs-recorded`.
 2. Make both `windows-harness.yml` workflows green (the owner dispatches them), or record
    which steps a hosted runner cannot run.
 

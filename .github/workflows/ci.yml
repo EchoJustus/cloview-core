@@ -56,9 +56,8 @@ jobs:
         run: clojure -M:static-check
 
       # The Greeter + kitchen sink, off-screen on JavaFX (Xvfb, software rendering): the
-      # built-in smoke test. Experimental until its first green run on a hosted runner.
+      # built-in smoke test.
       - name: JavaFX smoke of the Greeter (Xvfb)
-        continue-on-error: true
         run: xvfb-run -a clojure -J-Dprism.order=sw -M:smoke-javafx verify/out/ci-jvm-cljfx-smoke.json
 
       - name: ops tools (result recorder, CI summary)
@@ -76,12 +75,11 @@ jobs:
           retention-days: 14
 
   clr:
-    # Experimental until its first green run: the portable suites on ClojureCLR through the
-    # Clojure.Main tool (the Windows harness runs them inside the real WPF host).
-    name: ClojureCLR portable suites (experimental)
+    # The portable suites on ClojureCLR through the Clojure.Main tool (the Windows harness
+    # runs them inside the real WPF host).
+    name: ClojureCLR portable suites
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
 

@@ -104,8 +104,9 @@ sees the same folders as `/cloview-core/_inbox/`, `/cloview-core/_outbox/`,
      git config --system core.hooksPath /etc/git-hooks-readonly
      ```
 
-     This has not run in a cloud environment yet; the first session checks it
-     (DELIVERY_DESIGN.md §9). Add the .NET SDK only if you want the CLR suites in sessions.
+     It ran in the first cloud session, on 2026-10-26: that session found the Clojure
+     CLI, the loaded contract and the four hooks in place (DELIVERY_DESIGN.md §9). Add the
+     .NET SDK only if you want the CLR suites in sessions.
 10. **Start a session**: select cloview-core (and cloview-examples when the work needs it)
     on `main`, enable the Dropbox connector, choose Accept edits or Auto, and paste the
     prompt from `ops/CLAUDECODE_BOOTSTRAP_PROMPT.md` with the first task at its end. The

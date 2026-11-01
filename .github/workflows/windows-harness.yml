@@ -1,9 +1,10 @@
 # The Windows verification harness (verify/run-windows-checks.ps1) on a GitHub-hosted
 # Windows runner: JavaFX, real WPF and Flutter (the fitness benchmark on all three hosts
 # runs in cloview-examples' windows-harness workflow).
-# Manual for now (Actions > windows-harness > Run workflow, or `gh workflow run
-# windows-harness.yml`). Its first runs may need fixes; once green, it can also run on
-# pushes to main. The artifact holds the same results zip the owner used to upload by hand.
+# Started by hand only (Actions > windows-harness > Run workflow, or `gh workflow run
+# windows-harness.yml`): it first ran green on 2026-10-26 and gets no push trigger
+# (decision 103 in docs/STAGE_2_2_DECISIONS.md). The artifact holds the same results zip
+# the owner used to upload by hand.
 # The job passes only when every harness step is "ok": in CI a skipped step fails too
 # (the Verdict step; docs/topics/ci-windows-harness-green.md). R is the runner image's;
 # the step before the harness adds the packages of the real-R bridge test.
