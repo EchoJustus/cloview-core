@@ -39,8 +39,9 @@ details.
    Both have run since 2026-10-26: `ci.yml` is green, and `windows-harness.yml` is green
    with the real-R bridge test and a verdict that fails on any step that is not "ok"
    (topic `ci/windows-harness-green`). The JavaFX smoke and the `clr` job of `ci.yml`
-   are required parts (decision 102). Left, in cloview-examples: the same verdict in its
-   harness, and the same two parts required (topic `ci/first-runs-recorded`).
+   are required parts (decision 102). cloview-examples' harness has had the same verdict
+   since 2026-11-01, and its `ci.yml` has the same two parts required (topic
+   `ci/first-runs-recorded`): nothing of this item is left.
 1. **The Windows checks the harness does not cover yet** (WINDOWS_VERIFICATION_REPORT.md
    §8.5): `bb init` → `bb test` / `bb test:clr` / `bb dev` for each target, the Dart
    reference backend, and visual checks; R with `jsonlite` is covered since 2026-10-26

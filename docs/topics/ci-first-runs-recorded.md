@@ -24,6 +24,8 @@ The owner's choices of 2026-11-01:
   [STAGE_2_2_DECISIONS.md](../STAGE_2_2_DECISIONS.md)).
 - windows-harness stays started by hand in both repositories, with no push trigger
   (decision 103).
+- The Verdict line stays as it is when the harness's `aborted` text spans lines
+  (decision 104), and DEVELOPMENT_WORKFLOW.md §7 keeps its "Today" label.
 
 The changes, in order:
 
@@ -38,8 +40,10 @@ The changes, in order:
    `windows-harness.yml`, and the introduction of its VERIFY_ON_WINDOWS.md, which calls
    the run of 2026-10-25 the last recorded one.
 3. cloview-core 0002, once cloview-examples' harness is green with the verdict and its
-   change 0001 here is delivered: DEVELOPMENT_WORKFLOW.md §2 (cloview-examples' CI) and
-   §8 (items 1 and 2), and the roadmap's P1 item 0, say what cloview-examples has.
+   change 0001 here is delivered: DEVELOPMENT_WORKFLOW.md §2 (cloview-examples' CI and
+   both verdicts) and §8 (items 1 and 2), and the roadmap's P1 item 0, say what
+   cloview-examples has; §7 dates the result zip its estimates come from; decision 104
+   records the choice on the Verdict line.
 
 ## Out of scope
 
@@ -47,6 +51,9 @@ The changes, in order:
 - Dated records stay as written: WINDOWS_VERIFICATION_REPORT.md, and the decisions before
   102; item 97 only gets a note pointing to item 102, as item 93 has for items 99–101.
 - `run-windows-checks.ps1` and the verdict rule of the topic `ci/windows-harness-green`.
+- A one-line Verdict for an `aborted` text that spans lines (decision 104), and
+  DEVELOPMENT_WORKFLOW.md §7's "Today" label: its cost comparison compares two routes
+  that both still exist.
 
 ## Dependencies
 

@@ -36,19 +36,19 @@ read 2026-10-25). The repository ships two workflows:
 
 cloview-examples has its own CI, which checks out cloview-core next to it
 (`../cloview-core`): its `ci.yml` runs the fitness unit tests and the 37 oracles, the
-static check of `apps/` and the benchmark's checkers, plus an experimental JavaFX smoke
-and an experimental CLR job, and
-its `windows-harness.yml` runs its own Windows harness (steps 01–05) on demand. Started
-by hand, both take a `core_ref` input: the cloview-core branch, tag or commit to test
-against.
+static check of `apps/` and the benchmark's checkers, plus a JavaFX smoke and a CLR job,
+and its `windows-harness.yml` runs its own Windows harness (steps 01–05) on demand.
+Started by hand, both take a `core_ref` input: the cloview-core branch, tag or commit
+to test against.
 
 All four workflows have run on GitHub since 2026-10-26. Both `ci.yml` workflows and
 cloview-examples' `windows-harness.yml` were green that day; cloview-core's
 `windows-harness.yml` is green since the topic `ci/windows-harness-green` gave it the R
 packages of the real-R bridge test and a verdict that fails on any step that is not "ok"
-([topics/ci-windows-harness-green.md](topics/ci-windows-harness-green.md)). If the hosted
-Windows runner cannot run a GUI step, record why in WINDOWS_VERIFICATION_REPORT.md and
-move that step to a ticket (§4).
+([topics/ci-windows-harness-green.md](topics/ci-windows-harness-green.md)), and
+cloview-examples' `windows-harness.yml` has had the same verdict since 2026-11-01. If the
+hosted Windows runner cannot run a GUI step, record why in WINDOWS_VERIFICATION_REPORT.md
+and move that step to a ticket (§4).
 
 **Reading CI results without flooding the context:**
 
@@ -60,9 +60,10 @@ gh run download <run-id> -n linux-results      # the JSON summaries (verify/out)
 ```
 
 Every job also writes a Markdown summary (`ops/tools/ci_summary.py`), shown on the run's
-page. The windows-harness job passes only when every harness step is "ok" (its Verdict
-step, `ci_summary.py --require-ok`), since the harness itself exits 0. Artifacts of a
-public repository are public; the harness logs hold versions and paths, no secrets.
+page. The windows-harness jobs of both repositories pass only when every harness step is
+"ok" (their Verdict step, `ci_summary.py --require-ok`), since the harnesses themselves
+exit 0. Artifacts of a public repository are public; the harness logs hold versions and
+paths, no secrets.
 
 ## 3. Lane 2: your own PC as a self-hosted runner (optional)
 
@@ -198,7 +199,7 @@ These are also in [`CLAUDE.md`](../CLAUDE.md), which Claude Code loads in every 
 - **With this workflow:** a CI run plus `00-summary.json`, and one failing excerpt when
   something breaks, roughly 2–5k tokens.
 
-These are estimates from the size of the last result zip, not measurements.
+These are estimates from the size of the result zip of 2026-10-25, not measurements.
 
 ## 8. First Stage 3 work
 
@@ -210,11 +211,12 @@ checks it out), and dispatch both `windows-harness.yml` workflows once. Done on
 For Claude Code, delivering fixes as files (DELIVERY_DESIGN.md):
 
 1. Make both `ci.yml` workflows green. Then confirm the experimental `clr` jobs and either
-   keep them or remove them. Done: both have been green since 2026-10-26. cloview-core's
-   `clr` job and JavaFX smoke are required (decision 102); cloview-examples' follow in
-   the topic `ci/first-runs-recorded`.
+   keep them or remove them. Done: both have been green since 2026-10-26, and their `clr`
+   jobs and JavaFX smokes are required (decision 102).
 2. Make both `windows-harness.yml` workflows green (the owner dispatches them), or record
-   which steps a hosted runner cannot run.
+   which steps a hosted runner cannot run. Done: both are green with the verdict,
+   cloview-core's since 2026-10-26 and cloview-examples' since 2026-11-01, and the hosted
+   runner runs every step (§2).
 
 For the operator (tickets in `ops/jobs/`):
 
